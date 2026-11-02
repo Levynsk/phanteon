@@ -1,4 +1,5 @@
 import type { IceConfig, RtcSignalData, VoiceState } from '@phanteon/shared';
+import type { CaptureApp, CaptureMode } from '../../electron/shared/ipc';
 import { screenVideoConstraints, useAudioStore, type ScreenQuality } from '../app/stores/audio';
 import { api } from './api';
 import { realtime } from './realtime';
@@ -23,6 +24,9 @@ let localScreen: (sharing: boolean, tracks: ScreenTracks) => void = () => undefi
 let ice: RTCIceServer[] | undefined;
 let icePromise: Promise<RTCIceServer[]> | null = null;
 let signalsBound = false;
+let audioCapture: { context: AudioContext; node: AudioWorkletNode; destination: MediaStreamAudioDestinationNode; port: MessagePort; dispose: () => void } | null = null;
+let shareStream: MediaStream | null = null;
+let removeShareError: () => void = () => undefined;
 
 /** Fetched once per session; failure just means calls use public STUN only. */
 async function loadIce(): Promise<RTCIceServer[]> {
@@ -48,6 +52,7 @@ function bindSignals(): void {
 /** Starts (or keeps) the mesh for the user's call. Safe to call on every state change. */
 export async function syncVoiceMesh(selfId: string, states: VoiceState[], channelId: string | null): Promise<void> {
   if (!channelId) {
+    stopAudioCapture();
     current?.rtc.stop();
     current = null;
     return;
@@ -61,6 +66,7 @@ export async function syncVoiceMesh(selfId: string, states: VoiceState[], channe
     return;
   }
 
+  stopAudioCapture();
   current?.rtc.stop();
   const rtc = new VoiceRtc({
     channelId,
@@ -84,6 +90,10 @@ export async function syncVoiceMesh(selfId: string, states: VoiceState[], channe
 
 export function setSelfMuted(muted: boolean): void {
   current?.rtc.setSelfMuted(muted);
+}
+
+export function setSelfDeafened(deafened: boolean): void {
+  current?.rtc.setSelfDeafened(deafened);
 }
 
 export function setPlaybackMuted(userId: string, muted: boolean): void {
@@ -110,6 +120,7 @@ export function disconnectVoicePeer(userId: string): void {
 }
 
 export function stopVoiceMesh(): void {
+  stopAudioCapture();
   current?.rtc.stop();
   current = null;
 }
@@ -154,32 +165,80 @@ export async function startScreenShare(): Promise<{ hasAudio: boolean; label: st
   if (!current) throw new Error('Entre em uma chamada para compartilhar a tela.');
   if (!navigator.mediaDevices?.getDisplayMedia) throw new Error('Este sistema não permite capturar a tela.');
   const saved = useAudioStore.getState().prefs.screenQuality;
-  // the bridge is optional: a preload without it only loses the dialog's defaults,
-  // and sharing must keep working either way
   const bridge = window.desktop;
-  await bridge?.setShareQuality?.(saved).catch(() => undefined);
-
-  const stream = await navigator.mediaDevices.getDisplayMedia({
-    video: screenVideoConstraints(saved),
-    // `loopback` is what Chromium understands as "share system audio"
-    audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 2 } as MediaTrackConstraints,
-  } as DisplayMediaStreamOptions & { audio?: MediaTrackConstraints });
-
-  const video = stream.getVideoTracks()[0];
-  // the dialog may have picked another size: honour it for this share and remember it
-  const picked = await bridge?.consumeShareQuality?.().catch(() => null);
-  if (picked && video) {
-    await video.applyConstraints(screenVideoConstraints(picked)).catch(() => undefined);
-    useAudioStore.getState().setPrefs({ screenQuality: picked });
+  if (!bridge) throw new Error('A ponte segura de áudio da aplicação não está disponível.');
+  const support = await bridge.audioCaptureSupport();
+  if (!support.supported) throw new Error(support.reason ?? 'Captura de áudio não suportada neste sistema.');
+  await bridge.setShareQuality(saved);
+  let stream: MediaStream | null = null;
+  removeShareError = bridge.onAudioCaptureError((message) => {
+    stopAudioCapture();
+    current?.rtc.stopScreenShare();
+    shareStream = null;
+    console.error(message);
+  });
+  try {
+    stream = await navigator.mediaDevices.getDisplayMedia({ video: screenVideoConstraints(saved), audio: false });
+    const picked = await bridge.consumeShareQuality();
+    const audio = await bridge.consumeShareAudio();
+    if (!audio) throw new Error('Seleção de áudio da transmissão não encontrada.');
+    const video = stream.getVideoTracks()[0];
+    if (!video) throw new Error('A fonte selecionada não forneceu vídeo.');
+    if (picked) {
+      await video.applyConstraints(screenVideoConstraints(picked)).catch(() => undefined);
+      useAudioStore.getState().setPrefs({ screenQuality: picked });
+    }
+    const audioTrack = await startAudioCapture(audio.mode, audio.app, bridge);
+    const combined = new MediaStream([video, audioTrack]);
+    shareStream = combined;
+    const cleanupShare = () => { stopAudioCapture(); removeShareError(); shareStream = null; };
+    video.addEventListener('ended', cleanupShare, { once: true });
+    audioTrack.addEventListener('ended', cleanupShare, { once: true });
+    await current.rtc.shareScreen(combined);
+    return { hasAudio: true, label: video.label, quality: video.getSettings() };
+  } catch (error) {
+    for (const track of stream?.getTracks() ?? []) track.stop();
+    await bridge.stopAudioCapture().catch(() => undefined);
+    audioCapture?.dispose();
+    audioCapture = null;
+    removeShareError();
+    throw error;
   }
-
-  await current.rtc.shareScreen(stream);
-  return {
-    hasAudio: stream.getAudioTracks().length > 0,
-    label: video?.label ?? '',
-    quality: video?.getSettings() ?? {},
-  };
 }
+
+async function startAudioCapture(mode: CaptureMode, app: CaptureApp | undefined, bridge: NonNullable<Window['desktop']>): Promise<MediaStreamTrack> {
+  let resolvePort!: (port: MessagePort) => void;
+  let rejectPort!: (error: Error) => void;
+  const portReady = new Promise<MessagePort>((resolve, reject) => { resolvePort = resolve; rejectPort = reject; });
+  const unsubscribe = bridge.onAudioCapturePort((port) => { unsubscribe(); resolvePort(port); });
+  const unsubscribeError = bridge.onAudioCaptureError((message) => { unsubscribe(); unsubscribeError(); rejectPort(new Error(message)); });
+  try {
+    await bridge.startAudioCapture(mode, app);
+    const port = await portReady;
+    unsubscribeError();
+    const context = new AudioContext({ sampleRate: 48000 });
+    await context.audioWorklet.addModule(new URL('audio-capture-worklet.js', document.baseURI));
+    const destination = context.createMediaStreamDestination();
+    const node = new AudioWorkletNode(context, 'phanteon-pulse-pcm', { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2] });
+    node.port.postMessage(port, [port]);
+    node.connect(destination);
+    audioCapture = {
+      context, node, destination, port,
+      dispose: () => { port.close(); node.disconnect(); for (const track of destination.stream.getTracks()) track.stop(); void context.close(); },
+    };
+    return destination.stream.getAudioTracks()[0]!;
+  } catch (error) {
+    unsubscribe(); unsubscribeError();
+    throw error;
+  }
+}
+
+function stopAudioCapture(): void {
+  void window.desktop?.stopAudioCapture().catch(() => undefined);
+  audioCapture?.dispose();
+  audioCapture = null;
+}
+
 
 /**
  * Applies new quality settings to the capture that is already running, so the
@@ -195,6 +254,10 @@ export async function applyScreenQuality(quality: ScreenQuality): Promise<MediaT
 
 export function stopScreenShare(): void {
   current?.rtc.stopScreenShare();
+  for (const track of shareStream?.getTracks() ?? []) track.stop();
+  shareStream = null;
+  removeShareError();
+  stopAudioCapture();
 }
 
 export function sharingScreen(): boolean {

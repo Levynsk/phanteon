@@ -6,6 +6,7 @@ import { resolveApiBaseUrl } from './ipc/app';
 import { createMainWindow, focusMainWindow } from './window';
 import { autoGrantPermissions } from './permissions';
 import { registerDisplayCapture } from './display-capture';
+import { registerAudioCapture } from './audio-capture/service';
 
 const singleInstance = app.requestSingleInstanceLock();
 if (!singleInstance) {
@@ -101,6 +102,7 @@ app.whenReady().then(() => {
   registerIpc();
   autoGrantPermissions();
   registerDisplayCapture();
+  registerAudioCapture();
   createMainWindow();
   forwardDeepLinks(process.argv);
 

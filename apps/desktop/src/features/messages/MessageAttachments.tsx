@@ -4,6 +4,9 @@ import type { Attachment } from '@phanteon/shared';
 import { formatBytes } from '../../lib/format';
 import { cn } from '../../lib/cn';
 import { assetUrl } from '../../lib/asset-url';
+import { gridShape } from '../../lib/media-gallery';
+import { useUiStore, type LightboxItem } from '../../app/stores/ui';
+import { VideoPlayer } from './media/VideoPlayer';
 
 const ARCHIVE_EXT = new Set(['zip', 'rar', '7z', 'tar', 'gz']);
 
@@ -49,20 +52,15 @@ function FileCard({ attachment }: { attachment: Attachment }) {
   );
 }
 
-function VideoPlayer({ attachment }: { attachment: Attachment }) {
-  const source = assetUrl(attachment.url);
+function VideoAttachment({ attachment }: { attachment: Attachment }) {
   return (
-    <figure className="mt-1 max-w-[520px]">
-      <video
-        src={source}
-        controls
-        preload="metadata"
-        className="max-h-[360px] w-full rounded-md bg-app"
-        style={{
-          aspectRatio: attachment.width && attachment.height ? `${attachment.width} / ${attachment.height}` : undefined,
-        }}
-      >
-      </video>
+    <figure className="max-w-[520px]">
+      <VideoPlayer
+        src={assetUrl(attachment.url) ?? attachment.url}
+        width={attachment.width}
+        height={attachment.height}
+        filename={attachment.filename}
+      />
       <figcaption className="mt-0.5 flex items-center gap-1 text-[11px] text-muted">
         {attachment.filename} · {formatBytes(attachment.size)}
       </figcaption>
@@ -80,20 +78,46 @@ function AudioPlayer({ attachment }: { attachment: Attachment }) {
   );
 }
 
+/** Grid tiles stay compact and even; the single image above keeps its own ratio instead. */
+const TILE_ASPECT = 'aspect-[5/4]';
+const LEAD_WIDE_ASPECT = 'aspect-[2/1]';
+
+function toLightboxItems(attachments: Attachment[]): LightboxItem[] {
+  return attachments.map((attachment) => ({
+    id: attachment.id,
+    // every attachment has a URL at this point; the helper types it loosely for previews
+    url: assetUrl(attachment.url) ?? attachment.url,
+    filename: attachment.filename,
+    width: attachment.width,
+    height: attachment.height,
+  }));
+}
+
+/**
+ * One image shows whole at its own ratio; several become a Discord-style frame
+ * (see `gridShape`) with a large lead tile for three and five. A click hands
+ * the whole message to the viewer, so the arrows walk through it.
+ */
 function ImageGrid({ attachments }: { attachments: Attachment[] }) {
   const single = attachments.length === 1 ? attachments[0]! : null;
   if (single) {
     return (
       <figure className="mt-1 max-w-[520px]">
-        <a href={assetUrl(single.url)} target="_blank" rel="noreferrer" className="block">
+        <button
+          type="button"
+          onClick={() => useUiStore.getState().openLightbox(toLightboxItems(attachments), 0)}
+          className="block cursor-zoom-in rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-outline"
+          aria-label={`Abrir ${single.filename}`}
+        >
           <img
-            src={assetUrl(single.url)}
+            src={assetUrl(single.url) ?? single.url}
             alt={single.filename}
             loading="lazy"
+            decoding="async"
             className="max-h-[360px] w-auto max-w-full rounded-md bg-app object-contain"
             style={{ aspectRatio: single.width && single.height ? `${single.width} / ${single.height}` : undefined }}
           />
-        </a>
+        </button>
         <figcaption className="mt-0.5 text-[11px] text-muted">
           {single.filename} · {formatBytes(single.size)}
         </figcaption>
@@ -101,18 +125,42 @@ function ImageGrid({ attachments }: { attachments: Attachment[] }) {
     );
   }
 
+  const shape = gridShape(attachments.length);
+  const open = (index: number) => useUiStore.getState().openLightbox(toLightboxItems(attachments), index);
   return (
-    <ul className="mt-1 grid max-w-[520px] grid-cols-3 gap-1" aria-label={`${attachments.length} anexos`}>
-      {attachments.map((attachment) => (
-        <li key={attachment.id}>
-          <a href={assetUrl(attachment.url)} target="_blank" rel="noreferrer" title={attachment.filename}>
+    <ul
+      // the lead tile spans two cells of whatever direction it stretches into
+      className="mt-1 grid max-w-[520px] gap-1"
+      style={{ gridTemplateColumns: `repeat(${shape.columns}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${shape.rows}, minmax(0, 1fr))` }}
+      aria-label={`${attachments.length} imagens`}
+    >
+      {attachments.map((attachment, index) => (
+        <li
+          key={attachment.id}
+          className={cn(
+            index === 0 && shape.lead === 'wide' && 'col-span-2',
+            index === 0 && shape.lead === 'tall' && 'row-span-2',
+          )}
+        >
+          <button
+            type="button"
+            onClick={() => open(index)}
+            title={attachment.filename}
+            aria-label={`Abrir ${attachment.filename}`}
+            className={cn(
+              'group/tile relative block size-full overflow-hidden rounded-md bg-app cursor-zoom-in',
+              'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-outline',
+              index !== 0 || shape.lead === 'none' ? TILE_ASPECT : shape.lead === 'wide' ? LEAD_WIDE_ASPECT : 'h-full',
+            )}
+          >
             <img
               src={assetUrl(attachment.url)}
               alt={attachment.filename}
               loading="lazy"
-              className="aspect-square w-full rounded-md bg-app object-cover"
+              decoding="async"
+              className="size-full object-cover transition-transform duration-200 group-hover/tile:scale-[1.02]"
             />
-          </a>
+          </button>
         </li>
       ))}
     </ul>
@@ -129,7 +177,7 @@ export function MessageAttachments({ attachments, className }: { attachments: At
       {images.length > 0 ? <ImageGrid attachments={images} /> : null}
       {others.map((attachment) => {
         const kind = kindOf(attachment);
-        if (kind === 'video') return <VideoPlayer key={attachment.id} attachment={attachment} />;
+        if (kind === 'video') return <VideoAttachment key={attachment.id} attachment={attachment} />;
         if (kind === 'audio') return <AudioPlayer key={attachment.id} attachment={attachment} />;
         return <FileCard key={attachment.id} attachment={attachment} />;
       })}

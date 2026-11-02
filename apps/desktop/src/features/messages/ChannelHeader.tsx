@@ -1,8 +1,8 @@
 import type { Channel } from '@phanteon/shared';
 import { AtSign, Bell, BellOff, CheckCheck, Hash, Link2, Search, Users, X } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { Message } from '@phanteon/shared';
-import { useChatStore } from '../../app/stores/chat';
+import { api } from '../../lib/api';
 import { useUiStore } from '../../app/stores/ui';
 import { useNotificationStore } from '../../app/stores/notifications';
 import { toast } from '../../components/ui/Toast';
@@ -25,24 +25,45 @@ interface ChannelHeaderProps {
   dmWith?: string;
   /** Opens the profile card of the other side of a DM. */
   dmUserId?: string;
+  onJumpToMessage: (messageId: string) => void;
 }
 
-const EMPTY_MESSAGES: Message[] = [];
-
-export function ChannelHeader({ channel, isGuild, dmWith, dmUserId }: ChannelHeaderProps) {
+export function ChannelHeader({ channel, isGuild, dmWith, dmUserId, onJumpToMessage }: ChannelHeaderProps) {
   const memberListOpen = useUiStore((state) => state.memberListOpen);
   const toggleMemberList = useUiStore((state) => state.toggleMemberList);
   const openUserProfile = useUiStore((state) => state.openUserProfile);
-  const messages = useChatStore((state) => state.messages[channel.id]?.items ?? EMPTY_MESSAGES);
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState('');
+  const [results, setResults] = useState<Message[]>([]);
+  const [searching, setSearching] = useState(false);
   const markChannelRead = useNotificationStore((state) => state.markChannelRead);
 
-  const results = useMemo(() => {
-    const term = query.trim().toLowerCase();
-    if (!term) return [];
-    return messages.filter((message) => message.content.toLowerCase().includes(term)).slice(-30).reverse();
-  }, [messages, query]);
+  useEffect(() => {
+    const term = query.trim();
+    if (!term) {
+      setResults([]);
+      setSearching(false);
+      return;
+    }
+    let active = true;
+    setSearching(true);
+    const timer = window.setTimeout(() => {
+      void api.channels.searchMessages(channel.id, { query: term, limit: 30 }).then(
+        ({ messages }) => {
+          if (active) setResults(messages);
+        },
+        () => {
+          if (active) setResults([]);
+        },
+      ).finally(() => {
+        if (active) setSearching(false);
+      });
+    }, 250);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [channel.id, query]);
 
   const Icon = isGuild ? Hash : AtSign;
 
@@ -116,16 +137,28 @@ export function ChannelHeader({ channel, isGuild, dmWith, dmUserId }: ChannelHea
             <ScrollArea className="mt-2 max-h-[320px]">
               {query.trim() === '' ? (
                 <p className="px-2 py-4 text-center text-xs text-muted">Digite algo para buscar neste canal.</p>
+              ) : searching ? (
+                <p className="px-2 py-4 text-center text-xs text-muted">Buscando mensagens…</p>
               ) : results.length === 0 ? (
                 <p className="px-2 py-4 text-center text-xs text-muted">Nenhum resultado para “{query}”.</p>
               ) : (
                 <ul className="flex flex-col">
                   {results.map((message) => (
-                    <li key={message.id} className="rounded-sm px-2 py-1.5 hover:bg-hover">
-                      <span className="text-xs font-semibold" style={{ color: message.author.accentColor }}>
-                        {message.author.displayName}
-                      </span>
-                      <MessageContent content={message.content.slice(0, 240)} className="text-[13px]" />
+                    <li key={message.id}>
+                      <button
+                        type="button"
+                        className="w-full rounded-sm px-2 py-1.5 text-left hover:bg-hover"
+                        onClick={() => {
+                          onJumpToMessage(message.id);
+                          setSearchOpen(false);
+                          setQuery('');
+                        }}
+                      >
+                        <span className="text-xs font-semibold" style={{ color: message.author.accentColor }}>
+                          {message.author.displayName}
+                        </span>
+                        <MessageContent content={message.content.slice(0, 240)} className="text-[13px]" />
+                      </button>
                     </li>
                   ))}
                 </ul>

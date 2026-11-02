@@ -72,11 +72,11 @@ export function VoiceCallBar({ onOpen }: { onOpen: (guildId: string, channelId: 
   if (!myVoice) return null;
 
   return (
-    <div className="mb-1 flex w-full items-center gap-1 rounded-lg border border-divider bg-elevated pr-1 transition-colors hover:border-line-strong">
+    <div className="mb-1 flex w-full items-center gap-1 rounded-lg border border-divider bg-elevated p-1 transition-colors hover:border-line-strong">
     <button
       type="button"
       onClick={() => onOpen(myVoice.guildId, myVoice.channelId)}
-      className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-left"
+      className="flex h-10 min-w-0 flex-1 items-center gap-2 rounded-md px-2 text-left transition-colors hover:bg-hover"
       aria-label="Voltar para a chamada"
     >
       <span className="flex min-w-0 flex-1 flex-col">
@@ -87,13 +87,14 @@ export function VoiceCallBar({ onOpen }: { onOpen: (guildId: string, channelId: 
         </span>
       </span>
       {/* link quality to the server, shown only while the call is up */}
-      <ConnectionBars inline muted />
+      <ConnectionBars inline muted className="pr-1" />
     </button>
+    {/* same footprint and fill as the call button in the stage dock */}
     <IconButton
       icon={PhoneOff}
-      size={14}
+      size={18}
       label="Sair da chamada"
-      className="text-red hover:bg-red/15 hover:text-red"
+      className="size-10 rounded-lg text-red hover:bg-red/15 hover:text-red"
       onClick={() => void leaveVoice()}
     />
     </div>

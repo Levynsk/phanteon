@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, lt } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, lt, sql } from 'drizzle-orm';
 import type { Message, MessageReference, Reaction } from '@phanteon/shared';
 import { MAX_MESSAGE_ATTACHMENTS, MAX_MESSAGE_LENGTH, PAGE_SIZE, Permission } from '@phanteon/shared';
 import { db, schema } from '../db/client';
@@ -6,7 +6,7 @@ import { newId, nowIso } from '../db/ids';
 import { toMessage, toPublicUser } from '../db/mappers';
 import type { AttachmentRow, MessageRow, UserRow } from '../db/schema';
 import { badRequest, forbidden, notFound } from '../http/errors';
-import { channelAudience, fileAudience } from '../realtime/audience';
+import { channelAudience, messageAudience } from '../realtime/audience';
 import { hub } from '../realtime/hub';
 import { actorContext, canActOn, resolveChannelPermissions } from './roles';
 import { assertDmAllowed } from './relationships';
@@ -199,6 +199,28 @@ export function listMessages(
   return { messages: hydrateMessages(page, viewerId, origin), hasMore };
 }
 
+export function searchMessages(
+  channelId: string,
+  viewerId: string,
+  origin: string,
+  query: string,
+  limit = 30,
+): Message[] {
+  assertChannelAccess(channelId, viewerId);
+  const term = query.trim();
+  if (!term) return [];
+  const boundedLimit = Math.min(Math.max(limit, 1), 100);
+  const rows = db
+    .select()
+    .from(schema.messages)
+    .where(and(eq(schema.messages.channelId, channelId), sql`instr(lower(${schema.messages.content}), lower(${term})) > 0`))
+    .orderBy(desc(schema.messages.createdAt))
+    .limit(boundedLimit)
+    .all()
+    .reverse();
+  return hydrateMessages(rows, viewerId, origin);
+}
+
 function getMessageRow(messageId: string): MessageRow {
   const row = db.select().from(schema.messages).where(eq(schema.messages.id, messageId)).get();
   if (!row) throw notFound('Mensagem não encontrada.');
@@ -285,7 +307,7 @@ export function sendMessage(author: UserRow, channelId: string, input: SendMessa
   });
 
   const message = toMessage(row, author, attachments, replyTo, [], origin);
-  hub.emitToUsers(fileAudience(channelId), { type: 'message:create', message });
+  hub.emitToUsers(messageAudience(channelId), { type: 'message:create', message });
   return message;
 }
 
@@ -307,7 +329,7 @@ export function editMessage(user: UserRow, messageId: string, content: string, o
 
   const [message] = hydrateMessages([updated], user.id, origin);
   if (!message) throw notFound('Mensagem não encontrada.');
-  hub.emitToUsers(fileAudience(row.channelId), { type: 'message:update', message });
+  hub.emitToUsers(messageAudience(row.channelId), { type: 'message:update', message });
   return message;
 }
 
@@ -344,7 +366,7 @@ export function deleteMessage(user: UserRow, messageId: string): { channelId: st
   }
   // the row is gone; the file must not outlive it on an unauthenticated /files URL
   void deleteUploadedFiles(urls);
-  hub.emitToUsers(fileAudience(row.channelId), {
+  hub.emitToUsers(messageAudience(row.channelId), {
     type: 'message:delete',
     channelId: row.channelId,
     messageId,
@@ -381,6 +403,6 @@ export function toggleReaction(
       ?.find((entry) => entry.emoji === trimmed) ?? { emoji: trimmed, count: 0, me: false };
 
   const payload = { channelId: row.channelId, messageId, reaction };
-  hub.emitToUsers(fileAudience(row.channelId), { type: 'reaction:update', payload });
+  hub.emitToUsers(messageAudience(row.channelId), { type: 'reaction:update', payload });
   return payload;
 }

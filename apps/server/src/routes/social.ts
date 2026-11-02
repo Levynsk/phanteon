@@ -92,11 +92,12 @@ memberRoutes.get('/:userId', (c) => {
   const userId = c.req.param('userId');
 
   const user = db.select().from(schema.users).where(eq(schema.users.id, userId)).get();
-  if (!user) return c.json({ member: null });
+  if (!user) return c.json({ user: null, member: null });
 
+  const publicUser = toPublicUser(user, c.get('origin'));
   const membership = sharedMembership(me.id, userId);
   if (!membership && userId !== me.id && !sharesDm(me.id, userId)) {
-    return c.json({ member: null });
+    return c.json({ user: publicUser, member: null });
   }
 
   const roleIds = membership ? memberRolesOf(membership.guildId, user.id).map((role) => role.id) : [];
@@ -104,10 +105,10 @@ memberRoutes.get('/:userId', (c) => {
     guildId: membership?.guildId ?? '',
     role: membership?.role ?? 'member',
     joinedAt: membership?.joinedAt ?? user.createdAt,
-    user: toPublicUser(user),
+    user: publicUser,
     online: hub.isUserOnline(user.id),
     roleIds,
     position: membership ? resolveMemberPermissions(getGuildRow(membership.guildId), user.id).position : 0,
   };
-  return c.json({ member });
+  return c.json({ user: publicUser, member });
 });

@@ -1,6 +1,7 @@
-import { currentToken } from '../../lib/api';
+import { api, currentToken } from '../../lib/api';
+import { useAuthStore } from '../../app/stores/auth';
 import { CheckCheck, Compass, Copy, Link2, LogOut, MessageCircle, Plus, Settings } from 'lucide-react';
-import { Permission, type GuildWithDetails } from '@phanteon/shared';
+import { Permission, type GuildSummary, type GuildWithDetails } from '@phanteon/shared';
 import { useNotificationStore } from '../../app/stores/notifications';
 import {
   ContextMenu,
@@ -50,7 +51,29 @@ export function ServerRail() {
   const details = useChatStore(useShallow((state) => state.guildDetails));
   const openModal = useUiStore((state) => state.openModal);
   const markChannelRead = useNotificationStore((state) => state.markChannelRead);
+  const removeGuild = useChatStore((state) => state.removeGuild);
+  const currentUserId = useAuthStore((state) => state.user?.id);
   const navigate = useNavigate();
+
+  // the same confirm as the guild header: owners delete, everyone else actually leaves
+  const confirmLeave = (guild: GuildSummary) => {
+    const isOwner = !!currentUserId && guild.ownerId === currentUserId;
+    openModal({
+      kind: 'confirm',
+      title: isOwner ? 'Excluir servidor' : 'Sair do servidor',
+      description: isOwner
+        ? `Tem certeza que deseja excluir "${guild.name}"? Essa ação é permanente.`
+        : `Deseja sair de "${guild.name}"? Você só poderá voltar com um novo convite.`,
+      confirmLabel: isOwner ? 'Excluir servidor' : 'Sair do servidor',
+      onConfirm: async () => {
+        if (isOwner) await api.guilds.remove(guild.id);
+        else await api.guilds.leave(guild.id);
+        removeGuild(guild.id);
+        toast.success(isOwner ? 'Servidor excluído' : 'Você saiu do servidor');
+        navigate('/app');
+      },
+    });
+  };
 
   return (
     <nav
@@ -132,8 +155,8 @@ export function ServerRail() {
                     Copiar ID do servidor
                   </ContextMenuItem>
                   <ContextMenuSeparator />
-                  <ContextMenuItem variant="danger" icon={<LogOut size={14} />} onSelect={() => navigate('/app')}>
-                    Abrir mensagens diretas
+                  <ContextMenuItem variant="danger" icon={<LogOut size={14} />} onSelect={() => confirmLeave(guild)}>
+                    Sair do servidor
                   </ContextMenuItem>
                 </ContextMenuContent>
                 </ContextMenu>

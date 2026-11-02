@@ -23,7 +23,17 @@ export type ModalKind =
   | { kind: 'new-dm' }
   | { kind: 'add-friend' }
   | { kind: 'confirm'; title: string; description: string; confirmLabel: string; onConfirm: () => Promise<void> | void }
+  | { kind: 'lightbox'; items: LightboxItem[]; index: number; openedAt: number }
   | null;
+
+/** One image of the full-screen viewer; `url` is already resolved for the current session. */
+export interface LightboxItem {
+  id: string;
+  url: string;
+  filename: string;
+  width: number | null;
+  height: number | null;
+}
 
 /** Actions for one person in a call, opened by right-clicking their card. `at` is viewport px. */
 export interface PersonMenu {
@@ -34,6 +44,19 @@ export interface PersonMenu {
   canModerate: boolean;
   onVolume: (gain: number) => void;
   onProfile: () => void;
+}
+
+export type ResizablePanelId = 'members' | 'voice-chat';
+
+/** Bounds and default width of each panel the user can widen; the chat always keeps the larger share. */
+export const PANEL_WIDTH: Record<ResizablePanelId, { min: number; max: number; initial: number }> = {
+  members: { min: 200, max: 420, initial: 240 },
+  'voice-chat': { min: 300, max: 640, initial: 340 },
+};
+
+export function clampPanelWidth(id: ResizablePanelId, width: number): number {
+  const { min, max } = PANEL_WIDTH[id];
+  return Math.min(max, Math.max(min, Math.round(width)));
 }
 
 /** Message the composer is currently replying to (per channel). */
@@ -51,9 +74,14 @@ interface UiState {
   openPersonContextMenu: (menu: PersonMenu) => void;
   closePersonMenu: () => void;
   memberListOpen: boolean;
+  /** Widths chosen by dragging the panels' inner edges, kept only for this session. */
+  panelWidths: Record<ResizablePanelId, number>;
+  setPanelWidth: (id: ResizablePanelId, width: number) => void;
   searchOpen: boolean;
   socketStatus: SocketStatus;
   openModal: (modal: Exclude<ModalKind, null>) => void;
+  /** Opens the viewer on one image of a message; `openedAt` lets a second click restart it. */
+  openLightbox: (items: LightboxItem[], index: number) => void;
   openUserProfile: (userId: string, guildId?: string, at?: { x: number; y: number }, fallback?: HTMLElement | null) => void;
   closeModal: () => void;
   toggleMemberList: () => void;
@@ -70,11 +98,17 @@ export const useUiStore = create<UiState>((set) => ({
   openPersonContextMenu: (personMenu) => set({ personMenu }),
   closePersonMenu: () => set({ personMenu: null }),
   memberListOpen: true,
+  panelWidths: { members: PANEL_WIDTH.members.initial, 'voice-chat': PANEL_WIDTH['voice-chat'].initial },
+  setPanelWidth: (id, width) => set((state) => ({ panelWidths: { ...state.panelWidths, [id]: clampPanelWidth(id, width) } })),
   searchOpen: false,
   socketStatus: 'closed',
   // dialog state is deferred one microtask so a Radix menu/context-menu that is
   // closing (onSelect) cannot pull focus back and unmount the fresh dialog.
   openModal: (modal) => setTimeout(() => set({ modal }), 0),
+  openLightbox: (items, index) => set({
+    modal: { kind: 'lightbox', items, index: Math.min(Math.max(0, index), Math.max(0, items.length - 1)), openedAt: Date.now() },
+    personMenu: null,
+  }),
   openUserProfile: (userId, guildId, at, fallback) => {
     const bounds = fallback?.getBoundingClientRect();
     const position = at && (at.x !== 0 || at.y !== 0) ? at : (bounds

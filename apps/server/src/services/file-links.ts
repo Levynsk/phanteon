@@ -22,7 +22,7 @@ function signature(secret: string, name: string, exp: number): string {
 
 /** `name` is the bare file name (`id.png`), never a path. */
 export function signFileUrl(secret: string, name: string, now = Date.now(), ttlSeconds = FILE_URL_TTL_SECONDS): SignedFileQuery {
-  const exp = Math.floor(now / 1000) + ttlSeconds;
+  const exp = (Math.floor(now / (ttlSeconds * 1000)) + 1) * ttlSeconds;
   return { exp: String(exp), sig: signature(secret, name, exp) };
 }
 

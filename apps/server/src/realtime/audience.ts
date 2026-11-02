@@ -122,6 +122,13 @@ export function fileAudience(channelId: string): string[] {
   return guildMemberIds(channel.guildId).filter((userId) => (resolveChannelPermissions(guild, channelId, userId) & FILE_PERMISSION) === FILE_PERMISSION);
 }
 
+export function messageAudience(channelId: string): string[] {
+  const channel = db.select().from(schema.channels).where(eq(schema.channels.id, channelId)).get();
+  if (!channel) return [];
+  if (channel.kind !== 'guild' || !channel.guildId) return channelAudience(channelId);
+  return guildMemberIds(channel.guildId).filter((userId) => isChannelVisibleTo(channelId, userId));
+}
+
 export function canDownloadChannelFiles(channelId: string, userId: string): boolean {
   return fileAudience(channelId).includes(userId);
 }

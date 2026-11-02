@@ -25,6 +25,39 @@ import type {
 } from '@phanteon/shared';
 import { getApiUrl } from './config';
 
+export interface UserProfile {
+  user: PublicUser | null;
+  member: GuildMember | null;
+}
+
+const PROFILE_CACHE_TTL_MS = 3 * 60 * 1000;
+const profileCache = new Map<string, { profile: UserProfile; expiresAt: number }>();
+const profileRequests = new Map<string, Promise<UserProfile>>();
+const profileVersions = new Map<string, number>();
+
+function publicProfileUser(user: PublicUser): PublicUser {
+  const { email: _email, ...publicUser } = user;
+  return publicUser;
+}
+
+export function updateCachedUserProfile(user: PublicUser): void {
+  const publicUser = publicProfileUser(user);
+  profileVersions.set(user.id, (profileVersions.get(user.id) ?? 0) + 1);
+  const cached = profileCache.get(user.id);
+  if (cached) {
+    profileCache.set(user.id, {
+      profile: {
+        user: publicUser,
+        member: cached.profile.member
+          ? { ...cached.profile.member, user: publicUser }
+          : null,
+      },
+      expiresAt: Date.now() + PROFILE_CACHE_TTL_MS,
+    });
+  }
+  profileRequests.delete(user.id);
+}
+
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
@@ -167,6 +200,29 @@ export const api = {
   users: {
     search: (query: string) => request<{ users: PublicUser[] }>('/users', { query: { q: query } }),
     get: (userId: string) => request<{ user: PublicUser }>(`/users/${userId}`),
+    profile: (userId: string): Promise<UserProfile> => {
+      const cached = profileCache.get(userId);
+      if (cached && cached.expiresAt > Date.now()) return Promise.resolve(cached.profile);
+      if (cached) profileCache.delete(userId);
+      const pending = profileRequests.get(userId);
+      if (pending) return pending;
+      const version = profileVersions.get(userId) ?? 0;
+      const fetchProfile = request<UserProfile>(`/members/${userId}`).then((profile) => {
+        const publicUser = profile.user ? publicProfileUser(profile.user) : null;
+        const member = profile.member
+          ? { ...profile.member, user: publicProfileUser(profile.member.user) }
+          : null;
+        const normalized = { user: publicUser, member };
+        if ((profileVersions.get(userId) ?? 0) === version) {
+          profileCache.set(userId, { profile: normalized, expiresAt: Date.now() + PROFILE_CACHE_TTL_MS });
+        }
+        return normalized;
+      }).finally(() => {
+        if (profileRequests.get(userId) === fetchProfile) profileRequests.delete(userId);
+      });
+      profileRequests.set(userId, fetchProfile);
+      return fetchProfile;
+    },
     updateMe: (input: {
       displayName?: string;
       status?: UserStatus;
@@ -175,7 +231,6 @@ export const api = {
       bannerUrl?: string | null;
       bio?: string | null;
     }) => request<{ user: PublicUser }>('/users/@me', { method: 'PATCH', body: input }),
-    profile: (userId: string) => request<{ member: GuildMember | null }>(`/members/${userId}`),
   },
 
   guilds: {
@@ -273,6 +328,10 @@ export const api = {
       request<{ channels: Channel[] }>(`/channels/${channelId}/sync-permissions`, { method: 'POST' }),
     messages: (channelId: string, options: { before?: string; limit?: number } = {}) =>
       request<{ messages: Message[]; hasMore: boolean }>(`/channels/${channelId}/messages`, { query: options }),
+    searchMessages: (channelId: string, options: { query: string; limit?: number }) =>
+      request<{ messages: Message[] }>(`/channels/${channelId}/messages/search`, {
+        query: { q: options.query, limit: options.limit },
+      }),
     sendMessage: (
       channelId: string,
       input: { content: string; attachmentIds?: string[]; replyToId?: string | null },

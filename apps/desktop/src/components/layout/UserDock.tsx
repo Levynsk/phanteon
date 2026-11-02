@@ -1,8 +1,8 @@
-import { Bell, LogOut, Pencil, Settings, Volume2 as Volume2Icon } from 'lucide-react';
+import { LogOut, Pencil, Settings } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { Permission, type UserStatus } from '@phanteon/shared';
-import { canInGuild, useChatStore } from '../../app/stores/chat';
+import type { UserStatus } from '@phanteon/shared';
+import { useChatStore } from '../../app/stores/chat';
 import { useAuthStore } from '../../app/stores/auth';
 import { useUiStore } from '../../app/stores/ui';
 import { cn } from '../../lib/cn';
@@ -18,7 +18,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '../ui/DropdownMenu';
-import { MenuCheckboxItem, MenuCheckboxItemContent, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger } from '../ui/Menu';
+import { MenuItem } from '../ui/Menu';
 import { STATUS_LABEL, StatusBadge, StatusDot } from '../ui/Status';
 import { toast } from '../ui/Toast';
 
@@ -30,38 +30,42 @@ const STATUS_OPTIONS: UserStatus[] = ['online', 'idle', 'dnd', 'offline'];
  *
  * Everything in the dock sits on the theme's plain panel: the identity chip,
  * mic, sound and settings all share that surface, with no banner, avatar or
- * accent colour painted behind them.
+ * accent colour painted behind them. The settings button opens the user
+ * settings modal straight away; the avatar menu keeps status and sign-out.
  */
-export function UserDock({ guildId }: { guildId?: string }) {
+export function UserDock() {
   const user = useAuthStore((state) => state.user);
   const updateProfile = useAuthStore((state) => state.updateProfile);
   const logout = useAuthStore((state) => state.logout);
   const socketStatus = useUiStore((state) => state.socketStatus);
   const openModal = useUiStore((state) => state.openModal);
   const online = useChatStore((state) => (user ? state.online[user.id] : false));
-  const guild = useChatStore((state) => (guildId ? state.guildDetails[guildId] : undefined));
   const voiceStates = useChatStore((state) => state.voiceStates);
   const myVoice = useChatStore((state) => state.myVoice);
   const setSelfVoice = useChatStore((state) => state.setSelfVoice);
+  const voicePreference = useChatStore((state) => state.voicePreference);
   const mine = user && myVoice ? voiceStates[`${myVoice.guildId}:${user.id}`] : undefined;
   const navigate = useNavigate();
   const onOpenCall = (callGuildId: string, channelId: string) => navigate(`/app/${callGuildId}/${channelId}`);
-  const micMuted = mine?.selfMute ?? false;
-  const deafened = mine?.selfDeaf ?? false;
+  // out of a call the server has no seat to mute, so the dock shows what the next join will use
+  const micMuted = mine ? mine.selfMute : voicePreference.pending && voicePreference.selfMute;
+  const deafened = mine ? mine.selfDeaf : voicePreference.pending && voicePreference.selfDeaf;
 
-  // without a call the toggles stay visual (there is nothing to transmit)
   const toggleMute = () => {
-    if (mine) void setSelfVoice({ selfMute: !micMuted });
+    void setSelfVoice({ selfMute: !micMuted }).catch((error: unknown) =>
+      toast.error('Não foi possível silenciar', error instanceof Error ? error.message : undefined),
+    );
   };
   const toggleDeafen = () => {
     // deafening silences the mic as well (Discord semantics); the store enforces the same rule
-    if (mine) void setSelfVoice({ selfDeaf: !deafened, selfMute: !deafened ? true : undefined });
+    void setSelfVoice({ selfDeaf: !deafened, selfMute: !deafened ? true : undefined }).catch((error: unknown) =>
+      toast.error('Não foi possível alterar o som', error instanceof Error ? error.message : undefined),
+    );
   };
 
   if (!user) return null;
 
   const connected = socketStatus === 'open';
-  const canManageGuild = canInGuild(guild, Permission.ManageGuild);
 
   const changeStatus = async (next: UserStatus) => {
     try {
@@ -135,52 +139,15 @@ export function UserDock({ guildId }: { guildId?: string }) {
                 />
               </div>
 
-              <DropdownMenu>
-                <MenuTrigger asChild>
-                  <button
-                    type="button"
-                    className="inline-flex size-10 shrink-0 items-center justify-center rounded-lg text-muted transition-colors hover:bg-hover hover:text-heading data-[state=open]:bg-hover data-[state=open]:text-heading"
-                  >
-                    <Settings size={16} aria-hidden />
-                    <span className="sr-only">Configurações</span>
-                  </button>
-                </MenuTrigger>
-                <MenuContent side="top" align="start" sideOffset={10} className="w-[264px]">
-                  <MenuLabel>Configurações</MenuLabel>
-                  <MenuItem
-                    icon={<Settings size={14} />}
-                    onSelect={() => openModal({ kind: 'user-settings', section: 'profile' })}
-                  >
-                    Configurações de usuário
-                  </MenuItem>
-                  <MenuItem icon={<Volume2Icon size={14} />} onSelect={() => openModal({ kind: 'user-settings', section: 'voice' })}>
-                    Voz e áudio
-                  </MenuItem>
-                  <MenuItem icon={<Bell size={14} />} onSelect={() => openModal({ kind: 'user-settings', section: 'notifications' })}>
-                    Notificações
-                  </MenuItem>
-                  <MenuSeparator />
-                  <MenuItem icon={<Pencil size={14} />} onSelect={() => openModal({ kind: 'user-settings', section: 'profile' })}>
-                    Editar perfil
-                  </MenuItem>
-                  {guildId && canManageGuild ? (
-                    <MenuItem icon={<Settings size={14} />} onSelect={() => openModal({ kind: 'guild-settings', guildId })}>
-                      Configurações do servidor
-                    </MenuItem>
-                  ) : null}
-                  <MenuSeparator />
-                  <MenuCheckboxItem checked={micMuted} onCheckedChange={toggleMute}>
-                    <MenuCheckboxItemContent>Silenciar microfone</MenuCheckboxItemContent>
-                  </MenuCheckboxItem>
-                  <MenuCheckboxItem checked={deafened} onCheckedChange={toggleDeafen}>
-                    <MenuCheckboxItemContent>Desativar som</MenuCheckboxItemContent>
-                  </MenuCheckboxItem>
-                  <MenuSeparator />
-                  <MenuItem variant="danger" icon={<LogOut size={14} />} onSelect={logout}>
-                    Sair da conta
-                  </MenuItem>
-                </MenuContent>
-              </DropdownMenu>
+              {/* straight to the user settings: the modal has its own sidebar for the other sections */}
+              <button
+                type="button"
+                onClick={() => openModal({ kind: 'user-settings' })}
+                className="inline-flex size-10 shrink-0 items-center justify-center rounded-lg text-muted transition-colors hover:bg-hover hover:text-heading"
+              >
+                <Settings size={18} aria-hidden />
+                <span className="sr-only">Configurações de usuário</span>
+              </button>
             </div>
           </div>
         </div>
@@ -213,7 +180,7 @@ function DockToggle({
         active ? 'bg-red/15 text-red hover:bg-red/25' : 'text-muted hover:text-heading',
       )}
     >
-      <Icon size={16} aria-hidden />
+      <Icon size={20} aria-hidden />
     </button>
   );
 }

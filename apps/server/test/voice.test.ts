@@ -5,6 +5,7 @@ useTempDataDir();
 
 const { createApp } = await import('../src/app');
 const { migrate } = await import('../src/db/migrate');
+const { hub } = await import('../src/realtime/hub');
 const helpers = await import('./helpers');
 
 const app = createApp();
@@ -29,6 +30,47 @@ describe('voice channels', () => {
     const listed = await client.call('GET', `/api/voice/guilds/${guildId}`, { token: owner.token });
     expect(listed.status).toBe(200);
     expect(listed.body.states.map((state: { user: { id: string } }) => state.user.id)).toContain(member.user.id);
+  });
+
+  test('joining a different guild leaves the previous call and broadcasts coherent state', async () => {
+    const firstOwner = await client.register();
+    const secondOwner = await client.register();
+    const member = await client.register();
+    const firstGuildId = await helpers.sharedGuild(client, firstOwner, member);
+    const secondGuildId = await helpers.sharedGuild(client, secondOwner, member);
+    const firstVoiceId = await helpers.createVoiceChannel(client, firstOwner, firstGuildId);
+    const secondVoiceId = await helpers.createVoiceChannel(client, secondOwner, secondGuildId);
+
+    await client.call('POST', `/api/voice/channels/${firstVoiceId}/join`, { token: member.token });
+
+    const events: { recipients: string[]; event: { type: string; guildId?: string; channelId?: string; state?: { channelId: string; user: { id: string } } } }[] = [];
+    const proto = Object.getPrototypeOf(hub) as { emitToUsers: typeof hub.emitToUsers };
+    const original = proto.emitToUsers;
+    proto.emitToUsers = function (this: unknown, recipients, event) {
+      events.push({ recipients: [...recipients], event: event as never });
+      return original.call(this, recipients, event);
+    };
+    try {
+      const joined = await client.call('POST', `/api/voice/channels/${secondVoiceId}/join`, { token: member.token });
+      expect(joined.status).toBe(200);
+    } finally {
+      proto.emitToUsers = original;
+    }
+
+    const statesInFirstGuild = (await client.call('GET', `/api/voice/guilds/${firstGuildId}`, { token: firstOwner.token })).body.states;
+    const statesInSecondGuild = (await client.call('GET', `/api/voice/guilds/${secondGuildId}`, { token: secondOwner.token })).body.states;
+    expect(statesInFirstGuild.some((state: { user: { id: string } }) => state.user.id === member.user.id)).toBe(false);
+    expect(statesInSecondGuild.filter((state: { user: { id: string } }) => state.user.id === member.user.id)).toHaveLength(1);
+    expect(statesInSecondGuild.find((state: { user: { id: string } }) => state.user.id === member.user.id).channelId).toBe(secondVoiceId);
+
+    expect(events.filter(({ event }) => event.type === 'voice:leave')).toContainEqual({
+      recipients: expect.arrayContaining([firstOwner.user.id, member.user.id]),
+      event: { type: 'voice:leave', guildId: firstGuildId, channelId: firstVoiceId, userId: member.user.id },
+    });
+    expect(events.some(({ recipients, event }) =>
+      recipients.includes(secondOwner.user.id) && event.type === 'voice:state' &&
+      event.state?.user.id === member.user.id && event.state.channelId === secondVoiceId,
+    )).toBe(true);
   });
 
   test('rejects text channels and non-members', async () => {

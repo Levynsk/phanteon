@@ -7,11 +7,11 @@ import type { AppVariables } from '../http/context';
 import { jsonBody, queryParams } from '../http/validation';
 import { notFound } from '../http/errors';
 import { db, schema } from '../db/client';
-import { channelAudience } from '../realtime/audience';
+import { messageAudience } from '../realtime/audience';
 import { hub } from '../realtime/hub';
 import { deleteChannel, getGuildChannel, updateChannel } from '../services/guilds';
 import { channelOverridesFor } from '../services/roles';
-import { assertChannelAccess, deleteMessage, editMessage, listMessages, sendMessage } from '../services/messages';
+import { assertChannelAccess, deleteMessage, editMessage, listMessages, searchMessages, sendMessage } from '../services/messages';
 import { createCategory, deleteCategory, syncCategoryPermissions, updateCategory, updateChannelAccess, categoryDetails } from '../services/channels';
 
 const sendSchema = z.object({
@@ -34,6 +34,11 @@ const updateSchema = z.object({
 
 const listQuery = z.object({
   before: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+});
+
+const searchQuery = z.object({
+  q: z.string().trim().min(1).max(200),
   limit: z.coerce.number().int().min(1).max(100).optional(),
 });
 
@@ -62,6 +67,13 @@ channelRoutes.get('/:channelId/messages', queryParams(listQuery), (c) => {
   return c.json(page);
 });
 
+channelRoutes.get('/:channelId/messages/search', queryParams(searchQuery), (c) => {
+  const user = c.get('currentUser');
+  const { q, limit } = c.req.valid('query');
+  const messages = searchMessages(c.req.param('channelId'), user.id, c.get('origin'), q, limit);
+  return c.json({ messages });
+});
+
 channelRoutes.post('/:channelId/messages', jsonBody(sendSchema), (c) => {
   const user = c.get('currentUser');
   const body = c.req.valid('json');
@@ -78,7 +90,7 @@ channelRoutes.post('/:channelId/typing', (c) => {
   const user = c.get('currentUser');
   const channelId = c.req.param('channelId');
   assertChannelAccess(channelId, user.id);
-  hub.emitTyping(channelId, toPublicUser(user), channelAudience(channelId));
+  hub.emitTyping(channelId, toPublicUser(user), messageAudience(channelId));
   return c.body(null, 204);
 });
 

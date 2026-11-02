@@ -6,6 +6,7 @@ const RENDERER_URL = 'http://localhost:5273';
 const bin = (name: string) => `node_modules/.bin/${name}`;
 
 async function buildElectron(): Promise<void> {
+  await run('bun', ['run', 'build:audio-helper']);
   await run('bun', [
     'build',
     'electron/main.ts',

@@ -1,5 +1,5 @@
 import { MessageSquarePlus, Plus, UserPlus, Users } from 'lucide-react';
-import { useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAuthStore } from '../app/stores/auth';
 import { useChatStore } from '../app/stores/chat';
@@ -45,7 +45,12 @@ export function AppPage() {
   const loadGuild = useChatStore((state) => state.loadGuild);
   const loadMessages = useChatStore((state) => state.loadMessages);
   const memberListOpen = useUiStore((state) => state.memberListOpen);
+  const [jumpTarget, setJumpTarget] = useState<{ channelId: string; messageId: string } | null>(null);
   const navigate = useNavigate();
+  const requestJump = useCallback((messageId: string) => {
+    if (channelId) setJumpTarget({ channelId, messageId });
+  }, [channelId]);
+  const clearJump = useCallback(() => setJumpTarget(null), []);
 
   useEffect(() => {
     void bootstrap();
@@ -92,7 +97,7 @@ export function AppPage() {
           <ServerRail />
           {isDm || !guildId ? <DmSidebar /> : <ChannelSidebar guildId={guildId} />}
           {/* floating dock: anchored to the servers/channels column, never over the chat */}
-          <UserDock guildId={isDm ? undefined : (guildId ?? undefined)} />
+          <UserDock />
         </div>
 
         <main className="flex min-w-0 flex-1 flex-col bg-chat">
@@ -105,8 +110,15 @@ export function AppPage() {
                 isGuild={!isDm}
                 dmWith={dm?.recipients.find((user) => user.id !== currentUser?.id)?.displayName}
                 dmUserId={dm?.recipients.find((user) => user.id !== currentUser?.id)?.id}
+                onJumpToMessage={requestJump}
               />
-              <MessageList channelId={channel.id} guildId={isDm ? undefined : guildId ?? undefined} isDm={isDm} />
+              <MessageList
+                channelId={channel.id}
+                guildId={isDm ? undefined : guildId ?? undefined}
+                isDm={isDm}
+                jumpToMessageId={jumpTarget?.channelId === channel.id ? jumpTarget.messageId : null}
+                onJumpHandled={clearJump}
+              />
             </>
           ) : (
             <FriendsHome

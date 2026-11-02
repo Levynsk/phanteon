@@ -19,6 +19,7 @@ import {
   MenuItemContent,
 } from '../../components/ui/DropdownMenu';
 import { ScrollArea } from '../../components/ui/ScrollArea';
+import { ResizablePanel } from '../../components/layout/ResizablePanel';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -55,7 +56,7 @@ export function MemberList({ guildId }: MemberListProps) {
 
   return (
     // same column tone as the channel sidebar on the left, so the frame reads as one shell
-    <aside className="w-60 shrink-0 border-l border-divider bg-sidebar" aria-label="Membros do servidor">
+    <ResizablePanel panel="members" label="Membros do servidor" resizeLabel="Redimensionar lista de membros" className="bg-sidebar">
       <ScrollArea className="h-full" viewportClassName="px-2 py-4">
         <MemberGroup title={`Online — ${groups.online.length}`} members={groups.online} guildId={guildId} presence={presence} />
         {groups.offline.length > 0 ? (
@@ -67,7 +68,7 @@ export function MemberList({ guildId }: MemberListProps) {
           />
         ) : null}
       </ScrollArea>
-    </aside>
+    </ResizablePanel>
   );
 }
 

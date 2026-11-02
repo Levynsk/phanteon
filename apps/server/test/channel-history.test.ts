@@ -27,6 +27,13 @@ describe('private channel history', () => {
       body: { content: 'segredo do canal privado' },
     });
     expect(posted.status).toBeLessThan(300);
+    const matching = await client.call('GET', `/api/channels/${text.id}/messages/search?q=SEGREDO&limit=1`, { token: owner.token });
+    expect(matching.status).toBe(200);
+    expect(matching.body.messages).toHaveLength(1);
+    expect(matching.body.messages[0].content).toBe('segredo do canal privado');
+    expect(matching.body.messages[0].author.id).toBe(owner.user.id);
+    const emptySearch = await client.call('GET', `/api/channels/${text.id}/messages/search?q=%20%20`, { token: owner.token });
+    expect(emptySearch.status).toBe(400);
     const before = await client.call('GET', `/api/channels/${text.id}/messages`, { token: member.token });
     expect(before.status).toBe(200);
 
@@ -52,6 +59,9 @@ describe('private channel history', () => {
     const after = await client.call('GET', `/api/channels/${text.id}/messages`, { token: member.token });
     expect(after.status).toBe(403);
     expect(JSON.stringify(after.body)).not.toContain('segredo');
+    const hiddenSearch = await client.call('GET', `/api/channels/${text.id}/messages/search?q=segredo`, { token: member.token });
+    expect(hiddenSearch.status).toBe(403);
+    expect(JSON.stringify(hiddenSearch.body)).not.toContain('segredo');
 
     // the role holder still reads it
     const viewer = await client.register();

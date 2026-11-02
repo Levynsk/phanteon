@@ -6,6 +6,7 @@ import { ConfirmModal } from './ConfirmModal';
 import { ProfileModal } from './ProfileModal';
 import { CreateServerModal, InviteModal, JoinServerModal } from './ServerModals';
 import { NewDmModal, UserProfileModal } from './UserModals';
+import { Lightbox } from '../media/Lightbox';
 import { GuildSettingsModal } from '../../features/settings/GuildSettingsModal';
 import { UserSettingsModal } from '../../features/settings/UserSettingsModal';
 
@@ -27,6 +28,7 @@ export function ModalHost() {
       <ConfirmModal />
       <BanMemberModal />
       <AddFriendModal />
+      <Lightbox />
     </>
   );
 }

@@ -1,7 +1,7 @@
 import type { Message } from '@phanteon/shared';
 import { QUICK_EMOJIS } from '@phanteon/shared';
 import { ImageIcon, Link2, MessageCircle, Quote as QuoteIcon, SmilePlus } from 'lucide-react';
-import { Fragment, useCallback, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuthStore } from '../../app/stores/auth';
 import { Permission } from '@phanteon/shared';
 import { canInChannel, useChatStore } from '../../app/stores/chat';
@@ -31,9 +31,11 @@ interface MessageListProps {
   channelId: string;
   guildId?: string;
   isDm?: boolean;
+  jumpToMessageId?: string | null;
+  onJumpHandled?: () => void;
 }
 
-export function MessageList({ channelId, guildId, isDm }: MessageListProps) {
+export function MessageList({ channelId, guildId, isDm, jumpToMessageId, onJumpHandled }: MessageListProps) {
   const messages = useChatStore((state) => state.messages[channelId]?.items ?? EMPTY_MESSAGES);
   const hasMore = useChatStore((state) => state.messages[channelId]?.hasMore ?? false);
   const loaded = useChatStore((state) => state.messages[channelId]?.loaded ?? false);
@@ -45,24 +47,84 @@ export function MessageList({ channelId, guildId, isDm }: MessageListProps) {
 
   const jumpToMessage = useCallback((messageId: string) => {
     const target = document.getElementById(`message-${messageId}`);
-    if (!target) return;
+    if (!target) return false;
     target.scrollIntoView({ block: 'center', behavior: 'smooth' });
     setHighlightedId(messageId);
     if (highlightTimer.current) window.clearTimeout(highlightTimer.current);
-    highlightTimer.current = window.setTimeout(() => setHighlightedId(null), 1500);
+    highlightTimer.current = window.setTimeout(() => setHighlightedId(null), 5 * 60 * 1000);
+    return true;
   }, []);
 
-  // the viewport no longer starts at the bottom, so jump to the newest message once
+  useEffect(() => {
+    if (!jumpToMessageId) return;
+    if (jumpToMessage(jumpToMessageId)) {
+      onJumpHandled?.();
+      return;
+    }
+    const state = useChatStore.getState().messages[channelId];
+    if (!state?.loaded) {
+      void loadMessages(channelId);
+      return;
+    }
+    if (!state.hasMore || state.items.length === 0) {
+      onJumpHandled?.();
+      return;
+    }
+    void loadMessages(channelId, { before: state.items[0]?.id });
+  }, [channelId, jumpToMessageId, jumpToMessage, loadMessages, messages, onJumpHandled]);
+
   const scrolledRef = useRef<string | null>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
-  const scrollToNewest = useCallback(
-    (node: HTMLDivElement | null) => {
-      if (!node || !loaded || scrolledRef.current === channelId) return;
-      scrolledRef.current = channelId;
-      node.scrollTop = node.scrollHeight;
-    },
-    [channelId, loaded],
-  );
+  const nearBottomRef = useRef(true);
+  const previousMessagesRef = useRef<{ channelId: string; ids: string[]; loaded: boolean } | null>(null);
+  const [newMessageCount, setNewMessageCount] = useState(0);
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    viewport.scrollTo({ top: viewport.scrollHeight, behavior });
+    nearBottomRef.current = true;
+    setNewMessageCount(0);
+  }, []);
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!loaded || !viewport || scrolledRef.current === channelId) return;
+    scrolledRef.current = channelId;
+    viewport.scrollTop = viewport.scrollHeight;
+    nearBottomRef.current = true;
+  }, [channelId, loaded]);
+  const onViewportScroll = useCallback(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    nearBottomRef.current = viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= 100;
+    if (nearBottomRef.current) setNewMessageCount(0);
+  }, []);
+
+  useEffect(() => {
+    const ids = messages.map((message) => message.id);
+    const previous = previousMessagesRef.current;
+    if (previous?.channelId !== channelId) {
+      setNewMessageCount(0);
+      previousMessagesRef.current = { channelId, ids, loaded };
+      return;
+    }
+    if (previous && loaded && previous.loaded && ids.length > 0) {
+      const previousIds = new Set(previous.ids);
+      const previousLastIndex = previous.ids.length
+        ? ids.indexOf(previous.ids[previous.ids.length - 1]!)
+        : -1;
+      const appended = previousLastIndex >= 0
+        ? ids.slice(previousLastIndex + 1).filter((id) => !previousIds.has(id)).length
+        : 0;
+      if (appended > 0) {
+        if (nearBottomRef.current) {
+          scrollToBottom();
+        } else {
+          setNewMessageCount((count) => count + appended);
+        }
+      }
+    }
+    previousMessagesRef.current = { channelId, ids, loaded };
+  }, [channelId, loaded, messages, scrollToBottom]);
 
   const grouped = useMemo(
     () =>
@@ -81,12 +143,12 @@ export function MessageList({ channelId, guildId, isDm }: MessageListProps) {
   );
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-chat">
+    <div className="relative flex min-h-0 flex-1 flex-col bg-chat">
       <ScrollArea
         className="flex-1"
         viewportClassName="px-4"
         viewportRef={viewportRef}
-        viewportInnerRef={scrollToNewest}
+        onViewportScroll={onViewportScroll}
       >
         <div className="flex min-w-0 flex-col pb-2" role="log" aria-live="polite" aria-label="Mensagens">
           {hasMore ? (
@@ -124,6 +186,16 @@ export function MessageList({ channelId, guildId, isDm }: MessageListProps) {
           )}
         </div>
       </ScrollArea>
+      {newMessageCount > 0 ? (
+        <button
+          type="button"
+          onClick={() => scrollToBottom()}
+          className="absolute bottom-16 left-1/2 z-10 -translate-x-1/2 rounded-full bg-brand px-4 py-2 text-sm font-semibold text-on-brand shadow-lg hover:bg-brand-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-outline"
+          aria-label={`Ir para ${newMessageCount} ${newMessageCount === 1 ? 'nova mensagem' : 'novas mensagens'}`}
+        >
+          {newMessageCount} {newMessageCount === 1 ? 'nova mensagem' : 'novas mensagens'}
+        </button>
+      ) : null}
       <MessageComposer channelId={channelId} />
     </div>
   );

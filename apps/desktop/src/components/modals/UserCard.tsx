@@ -2,7 +2,7 @@ import { currentToken } from '../../lib/api';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Ban, Check, Clock, MessageSquare, UserPlus } from 'lucide-react';
-import type { FriendsOverview, GuildMember, RelationshipKind } from '@phanteon/shared';
+import type { FriendsOverview, GuildMember, PublicUser, RelationshipKind } from '@phanteon/shared';
 import { useAuthStore } from '../../app/stores/auth';
 import { useChatStore } from '../../app/stores/chat';
 import { useUiStore } from '../../app/stores/ui';
@@ -21,7 +21,7 @@ export function UserCard({ userId }: { userId: string }) {
   const navigate = useNavigate();
   const isMe = userId === currentUser?.id;
   const [member, setMember] = useState<GuildMember | null>(null);
-  const [profileUser, setProfileUser] = useState(currentUser?.id === userId ? currentUser : null);
+  const [profileUser, setProfileUser] = useState<PublicUser | null>(currentUser?.id === userId ? currentUser : null);
   const [loading, setLoading] = useState(true);
   const [friendKind, setFriendKind] = useState<RelationshipKind | null>(null);
 
@@ -32,13 +32,10 @@ export function UserCard({ userId }: { userId: string }) {
     setLoading(true);
     void (async () => {
       try {
-        const [{ member: profile }, { user: fetchedUser }] = await Promise.all([
-          api.users.profile(userId).catch(() => ({ member: null })),
-          api.users.get(userId),
-        ]);
+        const profile = await api.users.profile(userId);
         if (cancelled) return;
-        setMember(profile);
-        setProfileUser(currentUser?.id === userId ? currentUser : fetchedUser);
+        setMember(profile.member);
+        setProfileUser(currentUser?.id === userId ? currentUser : profile.user);
       } catch {
         if (!cancelled) setProfileUser(null);
       } finally {

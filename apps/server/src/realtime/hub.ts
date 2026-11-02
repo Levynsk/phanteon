@@ -1,6 +1,6 @@
 import type { ServerWebSocket } from 'bun';
 import type { ClientEvent, PublicUser, ServerEvent, VoiceState } from '@phanteon/shared';
-import { guildMemberIds, visibleChannelIds, visibleGuildIds } from './audience';
+import { guildMemberIds, messageAudience, visibleChannelIds, visibleGuildIds } from './audience';
 
 export interface SocketData {
   /** null until the socket authenticates; see `authenticate`. */
@@ -206,7 +206,7 @@ class RealtimeHub {
     const now = Date.now();
     if (now - (this.lastTypingAt.get(key) ?? 0) < 2500) return;
     this.lastTypingAt.set(key, now);
-    this.emitToChannels(audience, { type: 'typing', channelId, user: sender }, { except: [sender.id] });
+    this.emitToUsers(audience, { type: 'typing', channelId, user: sender }, { except: [sender.id] });
   }
 
   handleClientEvent(socket: HubSocket, raw: string | Buffer): void {
@@ -238,7 +238,9 @@ class RealtimeHub {
         for (const channelId of event.channelIds ?? []) this.unsubscribe(socket, channelId);
         break;
       case 'typing':
-        this.emitTyping(event.channelId, socket.data.user, [event.channelId]);
+        if (socket.data.channelIds.has(event.channelId)) {
+          this.emitTyping(event.channelId, socket.data.user, messageAudience(event.channelId));
+        }
         break;
       case 'voice:update':
         this.onVoiceUpdate?.(socket.data.user.id, {

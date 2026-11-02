@@ -112,7 +112,8 @@ export function joinVoice(user: UserRow, channelId: string): VoiceState {
   const { channel, permissions } = assertConnectPermission(channelId, user.id);
 
   // hopping an existing call skips neither Connect nor Speak checks
-  const existing = voiceStateOf(channel.guildId, user.id);
+  const existingStates = db.select().from(schema.voiceStates).where(eq(schema.voiceStates.userId, user.id)).all();
+  const existing = existingStates.find((state) => state.guildId === channel.guildId);
   const canSpeak = (permissions & Permission.Speak) === Permission.Speak;
 
   if (channel.userLimit > 0 && existing?.channelId !== channel.id) {
@@ -122,9 +123,11 @@ export function joinVoice(user: UserRow, channelId: string): VoiceState {
       throw badRequest(`Este canal está cheio (limite de ${channel.userLimit}).`);
     }
   }
-  db.delete(schema.voiceStates)
-    .where(and(eq(schema.voiceStates.guildId, channel.guildId), eq(schema.voiceStates.userId, user.id)))
-    .run();
+  db.delete(schema.voiceStates).where(eq(schema.voiceStates.userId, user.id)).run();
+  for (const previous of existingStates) {
+    if (previous.guildId === channel.guildId && previous.channelId === channel.id) continue;
+    broadcastLeave(previous.guildId, previous.channelId, user.id);
+  }
 
   // a deafened or muted user can still be there; only Speak gates transmission
   const row = {

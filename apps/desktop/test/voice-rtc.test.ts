@@ -176,6 +176,52 @@ describe('VoiceRtc device switching', () => {
     expect(replacements).toEqual([]);
     rtc.stop();
   });
+
+  test('local deafen silences every remote player and restores participant mute state', async () => {
+    const { VoiceRtc } = await import('../src/lib/voice-rtc');
+    const rtc = new VoiceRtc({
+      channelId: 'voz',
+      selfId: 'alice',
+      send: () => undefined,
+      onLocalSpeaking: () => undefined,
+      onRemoteSpeaking: () => undefined,
+    });
+    await rtc.start();
+    await rtc.connectTo('bob');
+    await rtc.connectTo('carol');
+    const peers = (rtc as unknown as { peers: Map<string, { connection: FakePeerConnection }> }).peers;
+    const players = (rtc as unknown as { players: Map<string, { muted: boolean }> }).players;
+    const deliverAudio = (id: string) => {
+      const peer = peers.get(id)!;
+      const ontrack = peer.connection.ontrack as (event: { track: FakeTrack; streams: FakeStream[] }) => void;
+      const track = Object.assign(new FakeTrack(`${id}-audio`), { kind: 'audio' });
+      ontrack({ track, streams: [new FakeStream(track)] });
+    };
+
+    rtc.setPlaybackMuted('bob', true);
+    deliverAudio('bob');
+    deliverAudio('carol');
+    rtc.setSelfDeafened(true);
+    expect(players.get('bob')?.muted).toBe(true);
+    expect(players.get('carol')?.muted).toBe(true);
+
+    rtc.setPlaybackMuted('carol', true);
+    rtc.setSelfDeafened(false);
+    expect(players.get('bob')?.muted).toBe(true);
+    expect(players.get('carol')?.muted).toBe(true);
+    rtc.setPlaybackMuted('bob', false);
+    expect(players.get('bob')?.muted).toBe(false);
+    expect(players.get('carol')?.muted).toBe(true);
+
+    rtc.setSelfDeafened(true);
+    await rtc.connectTo('dave');
+    const dave = peers.get('dave')!;
+    const ontrack = dave.connection.ontrack as (event: { track: FakeTrack; streams: FakeStream[] }) => void;
+    const track = Object.assign(new FakeTrack('dave-audio'), { kind: 'audio' });
+    ontrack({ track, streams: [new FakeStream(track)] });
+    expect(players.get('dave')?.muted).toBe(true);
+    rtc.stop();
+  });
 });
 
 describe('applySink', () => {

@@ -112,8 +112,8 @@ describe('voice logic', () => {
     await client.call('POST', `/api/voice/channels/${voiceA}/join`, { token: member.token });
     await client.call('POST', `/api/voice/channels/${voiceB}/join`, { token: member.token });
 
-    // a single PRIMARY KEY (guild, user) must not silently swallow the second seat
-    expect(listGuildVoiceStates(guildA, first.user.id)).toHaveLength(1);
+    // joining another guild first broadcasts/removes the previous seat
+    expect(listGuildVoiceStates(guildA, first.user.id)).toHaveLength(0);
     expect(listGuildVoiceStates(guildB, second.user.id)).toHaveLength(1);
 
     leaveVoiceOnDisconnect(member.user.id);

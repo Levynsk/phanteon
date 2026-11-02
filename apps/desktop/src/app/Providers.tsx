@@ -6,6 +6,7 @@ import { useNotificationStore } from './stores/notifications';
 import { playCue, unlockAudio } from '../lib/sounds';
 import { realtime } from '../lib/realtime';
 import { onSpeakingMeters } from '../lib/voice-session';
+import { updateCachedUserProfile } from '../lib/api';
 
 /**
  * Feeds an incoming message to the notification store with the context it needs
@@ -52,7 +53,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
       const currentUserId = useAuthStore.getState().user?.id ?? '';
       const chat = useChatStore.getState();
       useChatStore.getState().handleEvent(event, currentUserId);
-      if (event.type === 'user:update') useAuthStore.getState().applyUserUpdate(event.user);
+      if (event.type === 'user:update') {
+        updateCachedUserProfile(event.user);
+        useAuthStore.getState().applyUserUpdate(event.user);
+      }
       if (event.type === 'message:create') routeNotifiableMessage(event.message, currentUserId);
       if (event.type === 'friends:update') {
         const before = chat.friends?.incoming.length ?? 0;

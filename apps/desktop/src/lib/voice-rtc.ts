@@ -85,6 +85,7 @@ export class VoiceRtc {
   /** Audio elements that actually play remote tracks. */
   private readonly players = new Map<string, HTMLAudioElement>();
   private readonly forcedMute = new Map<string, boolean>();
+  private selfDeafened = false;
   /** Remote audio elements are metered through their own analyser, created lazily. */
   private readonly remoteAnalysers = new Map<string, { analyser: AnalyserNode; data: Uint8Array<ArrayBuffer> }>();
   private localStream: MediaStream | null = null;
@@ -473,11 +474,19 @@ export class VoiceRtc {
     for (const track of this.localTracks()) track.enabled = !muted;
   }
 
-  /** Local/remote mute applied to playback (self deafen, server mute, blocked users). */
+  /** Applies the local deafen to every remote voice player. */
+  setSelfDeafened(deafened: boolean): void {
+    this.selfDeafened = deafened;
+    for (const [userId, player] of this.players) {
+      player.muted = deafened || (this.forcedMute.get(userId) ?? false);
+    }
+  }
+
+  /** Server/participant mute applied to this person's local playback. */
   setPlaybackMuted(userId: string, muted: boolean): void {
     this.forcedMute.set(userId, muted);
     const player = this.players.get(userId);
-    if (player) player.muted = muted;
+    if (player) player.muted = this.selfDeafened || muted;
   }
 
   /** Per-person loudness on top of the global output volume (0..2). */
@@ -548,6 +557,12 @@ export class VoiceRtc {
       }
       const remote = event.streams[0] ?? new MediaStream([event.track]);
       peer.stream = remote;
+      event.track.addEventListener('ended', () => {
+        if (peer.stream?.getAudioTracks().every((track) => track.readyState === 'ended')) {
+          peer.speaking = false;
+          this.setRemoteSpeaking(userId, false);
+        }
+      }, { once: true });
       this.playRemote(userId, remote);
     };
     return peer;
@@ -603,7 +618,7 @@ export class VoiceRtc {
       void this.routePlayer(player, outputId);
     }
     player.srcObject = stream;
-    player.muted = this.forcedMute.get(userId) ?? false;
+    player.muted = this.selfDeafened || (this.forcedMute.get(userId) ?? false);
     const { outputVolume, userVolumes } = useAudioStore.getState().prefs;
     player.volume = clampVolume(outputVolume * (userVolumes[userId] ?? 1));
     player.play().catch(() => undefined);
@@ -647,8 +662,7 @@ export class VoiceRtc {
 
   private remoteSpeaking(userId: string): boolean {
     const stream = this.peers.get(userId)?.stream;
-    const player = this.players.get(userId);
-    if (!stream || !player || player.muted || !this.audioContext) return false;
+    if (!stream || !stream.getAudioTracks().some((track) => track.enabled && track.readyState === 'live') || !this.audioContext) return false;
     let entry = this.remoteAnalysers.get(userId);
     if (!entry) {
       try {

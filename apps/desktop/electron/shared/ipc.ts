@@ -1,4 +1,6 @@
 export type WindowAction = 'minimize' | 'maximize' | 'close';
+export type CaptureMode = 'app' | 'desktop';
+export interface CaptureApp { id: string; name: string; pid: number; binary: string }
 
 export interface DesktopApi {
   platform: string;
@@ -11,8 +13,15 @@ export interface DesktopApi {
    * for matching constraints.
    */
   consumeShareQuality: () => Promise<{ height: number; frameRate: number } | null>;
+  consumeShareAudio: () => Promise<{ mode: CaptureMode; app?: CaptureApp } | null>;
   /** Pre-fills the share picker with the quality last used. */
   setShareQuality: (quality: { height: number; frameRate: number }) => Promise<void>;
+  audioCaptureSupport: () => Promise<{ supported: boolean; reason?: string }>;
+  listAudioCaptureApps: () => Promise<CaptureApp[]>;
+  startAudioCapture: (mode: CaptureMode, app?: CaptureApp) => Promise<void>;
+  stopAudioCapture: () => Promise<void>;
+  onAudioCapturePort: (listener: (port: MessagePort) => void) => () => void;
+  onAudioCaptureError: (listener: (message: string) => void) => () => void;
   window: {
     minimize: () => void;
     toggleMaximize: () => void;
@@ -33,7 +42,14 @@ export const IPC = {
   appVersion: 'app:version',
   apiBaseUrl: 'app:api-base-url',
   consumeShareQuality: 'display-capture:consume-quality',
+  consumeShareAudio: 'display-capture:consume-audio',
   setShareQuality: 'display-capture:set-quality',
+  audioCaptureSupport: 'audio-capture:support',
+  listAudioCaptureApps: 'audio-capture:list-apps',
+  startAudioCapture: 'audio-capture:start',
+  stopAudioCapture: 'audio-capture:stop',
+  audioCapturePort: 'audio-capture:port',
+  audioCaptureError: 'audio-capture:error',
   windowAction: 'window:action',
   windowMaximizedQuery: 'window:is-maximized',
   windowMaximizedEvent: 'window:maximized-changed',

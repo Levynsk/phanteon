@@ -41,12 +41,14 @@ type VoiceEvent = Extract<
 >;
 
 let playback: ReturnType<typeof spyOn>;
+let deafened: ReturnType<typeof spyOn>;
 let reconcile: ReturnType<typeof spyOn>;
 let disconnect: ReturnType<typeof spyOn>;
 
 beforeEach(() => {
   // no RTC session runs in this test, so only the store's calls matter
   playback = spyOn(session, 'setPlaybackMuted').mockImplementation(() => {});
+  deafened = spyOn(session, 'setSelfDeafened').mockImplementation(() => {});
   reconcile = spyOn(session, 'reconcileVoiceMesh').mockResolvedValue(undefined);
   disconnect = spyOn(session, 'disconnectVoicePeer').mockImplementation(() => {});
   useChatStore.getState().reset();
@@ -55,6 +57,7 @@ beforeEach(() => {
 
 afterEach(() => {
   playback.mockRestore();
+  deafened.mockRestore();
   reconcile.mockRestore();
   disconnect.mockRestore();
 });
@@ -88,6 +91,27 @@ describe('voice store event handling', () => {
     expect(lastPlayback(PEER)).toBe(true);
     handle({ type: 'voice:state', state: voiceState(PEER, { selfDeaf: false }) });
     expect(lastPlayback(PEER)).toBe(false);
+  });
+
+  test('my own voice state applies global deafen without muting my user id as a peer', () => {
+    handle({ type: 'voice:state', state: voiceState(ME, { selfDeaf: true, selfMute: true }) });
+    expect(deafened.mock.calls.at(-1)?.[0]).toBe(true);
+    expect(playback.mock.calls).toHaveLength(0);
+
+    handle({ type: 'voice:state', state: voiceState(ME, { selfDeaf: false, selfMute: true }) });
+    expect(deafened.mock.calls.at(-1)?.[0]).toBe(false);
+    expect(playback.mock.calls).toHaveLength(0);
+  });
+
+  test('voice sync applies my deafen and continues applying each peer mute independently', () => {
+    handle({
+      type: 'voice:sync',
+      states: [voiceState(ME, { serverDeaf: true }), voiceState(PEER, { selfDeaf: true })],
+      audience: [],
+    });
+    expect(deafened.mock.calls.at(-1)?.[0]).toBe(true);
+    expect(playback.mock.calls.map((call: unknown[]) => call[0])).toEqual([PEER]);
+    expect(lastPlayback(PEER)).toBe(true);
   });
 
   test('reconnecting mid-call does not drop the caller out of the call', () => {

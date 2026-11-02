@@ -1,16 +1,4 @@
-import {
-  LogIn,
-  LogOut,
-  Maximize2,
-  MessageSquare,
-  Minimize2,
-  MonitorUp,
-  ScreenShareOff,
-  Settings,
-  UserRound,
-  Volume1,
-  Volume2,
-} from 'lucide-react';
+import { LogIn, Maximize2, MessageSquare, Minimize2, MonitorUp, UserRound, Volume1, Volume2 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import type { Channel, VoiceState } from '@phanteon/shared';
@@ -21,20 +9,22 @@ import { useAuthStore } from '../../app/stores/auth';
 import { useUiStore } from '../../app/stores/ui';
 import { Avatar } from '../../components/ui/Avatar';
 import { BannerBackdrop } from '../../components/layout/BannerBackdrop';
+import { ResizablePanel } from '../../components/layout/ResizablePanel';
 import { Button } from '../../components/ui/Button';
 import { toast } from '../../components/ui/Toast';
 import { cn } from '../../lib/cn';
-import { onScreenShare, setPlaybackVolume, startScreenShare, stopScreenShare } from '../../lib/voice-session';
+import { onScreenShare, setPlaybackVolume, sharingScreen, stopScreenShare } from '../../lib/voice-session';
 import { applySink, useAudioStore } from '../../app/stores/audio';
 import { openPersonMenu } from './personMenu';
-import { MIC_OFF, MIC_ON, OFF_STATE, SOUND_OFF, SOUND_ON } from '../../lib/voice-indicators';
+import { MIC_OFF, OFF_STATE, SOUND_OFF } from '../../lib/voice-indicators';
+import { CallDock } from './CallDock';
 import { MessageList } from '../messages/MessageList';
 import { AVATAR_FOR, layoutStage, stageCaps, type TileSize } from './voiceStageLayout';
 
 /**
  * Voice channel page, mirroring Discord: a voice stage on the left with
- * "join"/"leave", the connected tiles and the call controls, plus a text chat
- * that belongs to this voice channel alone.
+ * "join"/"leave", the connected tiles and the call dock over the stage, plus a
+ * text chat that belongs to this voice channel alone.
  */
 export function VoiceChannelView({ guildId, channel }: { guildId: string; channel: Channel }) {
   const guild = useChatStore((state) => state.guildDetails[guildId]);
@@ -52,8 +42,7 @@ export function VoiceChannelView({ guildId, channel }: { guildId: string; channe
   const [sharing, setSharing] = useState<Record<string, boolean>>({});
   const [screens, setScreens] = useState<Record<string, MediaStreamTrack | null>>({});
   const [screenAudio, setScreenAudio] = useState<Record<string, MediaStreamTrack | null>>({});
-  const [sharingLocal, setSharingLocal] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [sharingLocal, setSharingLocal] = useState(sharingScreen);
 
   const currentUserId = useAuthStore((state) => state.user?.id);
   const selfId = currentUserId ?? null;
@@ -84,37 +73,6 @@ export function VoiceChannelView({ guildId, channel }: { guildId: string; channe
   const deafened = mine?.selfDeaf ?? false;
   const anyoneSharing = Object.values(sharing).some(Boolean);
 
-  const toggleShare = async () => {
-    if (busy) return;
-    setBusy(true);
-    try {
-      if (sharingLocal) {
-        stopScreenShare();
-        return;
-      }
-      const { hasAudio, label, quality } = await startScreenShare();
-      // report what the OS actually delivered, not what was asked for
-      const actual =
-        quality.width && quality.height
-          ? `${quality.height}p${quality.frameRate ? ` @ ${Math.round(quality.frameRate)} fps` : ''}`
-          : '';
-      if (!hasAudio) {
-        // Electron asks the OS for system audio itself, so there is no picker option to point at
-        toast.error(
-          'Compartilhando sem áudio',
-          'O sistema não entregou o áudio da tela. O microfone continua na call normalmente.',
-        );
-      } else if (label) {
-        toast.success(actual ? `Transmitindo em ${actual}` : `Transmitindo: ${label}`, actual ? label : undefined);
-      }
-    } catch (error) {
-      // passive cases: the picker was closed, or Electron had no screen to capture
-      if (error instanceof DOMException && (error.name === 'NotAllowedError' || error.name === 'AbortError')) return;
-      toast.error('Falha ao compartilhar a tela', error instanceof Error ? error.message : undefined);
-    } finally {
-      setBusy(false);
-    }
-  };
   // leaving the call must also stop a running share
   useEffect(() => {
     if (!inThisChannel && sharingLocal) stopScreenShare();
@@ -190,31 +148,31 @@ export function VoiceChannelView({ guildId, channel }: { guildId: string; channe
             )}
           </div>
 
-          {inThisChannel || participants.length > 0 ? (
-            <CallControls
+          {/* the dock sits at the bottom of the stage column, under the tiles and always on screen */}
+          <div className="pointer-events-none relative z-10 flex shrink-0 justify-center pb-3">
+            <CallDock
+              variant="floating"
               inCall={inThisChannel}
               micMuted={micMuted}
               deafened={deafened}
-              screenShared={sharingLocal}
-              sharingBusy={busy}
               canConnect={canConnect}
               onToggleMic={() => void setSelfVoice({ selfMute: !micMuted })}
               // deafen implies mute in the store; un-deafening keeps the mic muted until the user unmutes
               onToggleSound={() => void setSelfVoice({ selfDeaf: !deafened, selfMute: !deafened ? true : undefined })}
               onToggleCall={() => void toggle()}
-              onToggleScreen={() => void toggleShare()}
+              onOpenVoiceSettings={() => useUiStore.getState().openModal({ kind: 'user-settings', section: 'voice' })}
             />
-          ) : null}
+          </div>
         </div>
       </section>
 
-      <aside className="flex w-[340px] shrink-0 flex-col border-l border-divider bg-chat" aria-label="Chat do canal de voz">
+      <ResizablePanel panel="voice-chat" label="Chat do canal de voz" resizeLabel="Redimensionar chat do canal de voz" border className="bg-chat">
         <header className="flex h-12 shrink-0 items-center gap-2 border-b border-divider px-4">
           <MessageSquare size={16} className="text-muted" aria-hidden />
-          <span className="text-sm font-semibold text-heading">Chat de #{channel.name}</span>
+          <span className="truncate text-sm font-semibold text-heading">Chat de #{channel.name}</span>
         </header>
         <MessageList channelId={channel.id} guildId={guildId} />
-      </aside>
+      </ResizablePanel>
 
       {/* screen audio is a separate track from the voices, so it plays in its own element */}
       {Object.entries(screenAudio).map(([userId, track]) =>
@@ -499,8 +457,8 @@ function StageTile({
       }
       className={cn(
         'group/tile absolute inset-0 flex flex-col overflow-hidden rounded-lg',
-        focused ? 'border-2' : 'border border-divider',
-        focused && (active ? 'border-green' : 'border-divider'),
+        focused ? 'border-2' : 'border',
+        active ? 'border-green' : 'border-divider',
       )}
     >
       <BannerBackdrop
@@ -626,111 +584,3 @@ function ScreenTile({ track }: { track: MediaStreamTrack }) {
   );
 }
 
-/**
- * The call bar: leave on the left, then the mic/sound toggles. Screen sharing is
- * wired in the mesh but disabled here until it ships.
- */
-function CallControls({
-  inCall,
-  micMuted,
-  deafened,
-  screenShared,
-  sharingBusy,
-  canConnect,
-  onToggleMic,
-  onToggleSound,
-  onToggleCall,
-  onToggleScreen,
-}: {
-  inCall: boolean;
-  micMuted: boolean;
-  deafened: boolean;
-  screenShared: boolean;
-  sharingBusy: boolean;
-  canConnect: boolean;
-  onToggleMic: () => void;
-  onToggleSound: () => void;
-  onToggleCall: () => void;
-  onToggleScreen: () => void;
-}) {
-  return (
-    <div className="flex shrink-0 items-center justify-center gap-1.5 border-t border-divider px-4 py-3">
-      <ControlButton
-        icon={inCall ? LogOut : LogIn}
-        label={inCall ? 'Sair da chamada' : 'Entrar na chamada'}
-        tone={inCall ? 'danger' : 'primary'}
-        disabled={!canConnect && !inCall}
-        onClick={onToggleCall}
-      />
-      <span className="mx-1 h-6 w-px bg-divider" aria-hidden />
-      <ControlButton
-        icon={micMuted ? MIC_OFF : MIC_ON}
-        label={micMuted ? 'Ativar microfone' : 'Silenciar microfone'}
-        tone={micMuted ? 'off' : 'neutral'}
-        disabled={!inCall}
-        onClick={onToggleMic}
-      />
-      <ControlButton
-        icon={deafened ? SOUND_OFF : SOUND_ON}
-        label={deafened ? 'Ativar som' : 'Desativar som'}
-        tone={deafened ? 'off' : 'neutral'}
-        disabled={!inCall}
-        onClick={onToggleSound}
-      />
-      <ControlButton
-        icon={screenShared ? ScreenShareOff : MonitorUp}
-        label={screenShared ? 'Parar transmissão' : 'Transmitir tela'}
-        tone={screenShared ? 'active' : 'neutral'}
-        disabled={!inCall || sharingBusy}
-        onClick={onToggleScreen}
-      />
-      {/* same affordance as the dock: settings and the call chip stay reachable from the stage */}
-      <span className="mx-1 h-6 w-px bg-divider" aria-hidden />
-      <ControlButton
-        icon={Settings}
-        label="Configurações de voz"
-        tone="neutral"
-        onClick={() => useUiStore.getState().openModal({ kind: 'user-settings', section: 'voice' })}
-      />
-    </div>
-  );
-}
-
-/** Icon-only button: the call bar stays compact, the tooltip and aria-label carry the name. */
-function ControlButton({
-  icon: Icon,
-  label,
-  tone,
-  disabled,
-  onClick,
-}: {
-  icon: LucideIcon;
-  label: string;
-  tone: 'primary' | 'danger' | 'off' | 'active' | 'neutral';
-  disabled?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      aria-pressed={tone === 'off' || undefined}
-      disabled={disabled}
-      onClick={onClick}
-      className={cn(
-        'inline-flex size-10 items-center justify-center rounded-lg transition-colors',
-        'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-outline',
-        tone === 'primary' && 'bg-brand text-on-brand hover:bg-brand-hover',
-        tone === 'danger' && 'bg-red/15 text-red hover:bg-red/25',
-        // the same red as every read-only "off" indicator, on a quiet fill
-        tone === 'off' && 'bg-red/15 text-red hover:bg-red/25',
-        tone === 'active' && 'bg-brand-soft text-brand hover:bg-brand/25',
-        tone === 'neutral' && 'text-on-image hover:bg-white/15',
-        disabled && 'cursor-not-allowed opacity-40 hover:bg-transparent',
-      )}
-    >
-      <Icon size={18} aria-hidden />
-    </button>
-  );
-}

@@ -6,4 +6,6 @@ export interface DisplayPickChoice {
   id: string;
   height: number;
   frameRate: number;
+  audioMode: 'app' | 'desktop';
+  audioApp: string;
 }

@@ -1,7 +1,7 @@
 import type { AuthSession, PublicUser, UserStatus } from '@phanteon/shared';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { api, configureApi } from '../../lib/api';
+import { api, configureApi, updateCachedUserProfile } from '../../lib/api';
 import { useChatStore } from './chat';
 
 // Registered at module load so requests made before any screen mounts
@@ -90,6 +90,7 @@ export const useAuthStore = create<AuthState>()(
 
       updateProfile: async (input) => {
         const { user } = await api.users.updateMe(input);
+        updateCachedUserProfile(user);
         set({ user });
       },
 

@@ -45,8 +45,8 @@ export function ConnectionBars({ inline = false, muted = false, className }: { i
       aria-label={ms === null ? label : `${label}, ${ms} milissegundos`}
       role="img"
     >
-      <Icon size={inline ? 12 : 13} className={muted ? 'text-muted' : color} aria-hidden />
-      <span className={cn('text-[10px] font-semibold tabular-nums leading-none', muted ? 'text-muted' : color)}>
+      <Icon size={inline ? 16 : 13} className={muted ? 'text-muted' : color} aria-hidden />
+      <span className={cn('font-semibold tabular-nums leading-none', inline ? 'text-[12px]' : 'text-[10px]', muted ? 'text-muted' : color)}>
         {ms === null ? '—' : `${ms} ms`}
       </span>
     </span>

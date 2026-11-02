@@ -16,6 +16,7 @@ import {
   disconnectVoicePeer,
   reconcileVoiceMesh,
   setPlaybackMuted,
+  setSelfDeafened,
   setSelfMuted,
   stopVoiceMesh,
   syncVoiceMesh,
@@ -23,6 +24,9 @@ import {
 import { create } from 'zustand';
 import { useNotificationStore } from './notifications';
 import { api } from '../../lib/api';
+import { playCue } from '../../lib/sounds';
+import { applyVoicePreference, NO_PREFERENCE } from '../../lib/voice-preference';
+import type { VoicePreference } from '../../lib/voice-preference';
 
 export interface ChannelMessages {
   items: Message[];
@@ -51,6 +55,8 @@ interface ChatState {
   speaking: Record<string, boolean>;
   /** Guild of the voice call the current user is connected to. */
   myVoice: { guildId: string; channelId: string } | null;
+  /** Mic/sound chosen while out of a call, applied when the next join lands. */
+  voicePreference: VoicePreference;
   /** Signed-in user id, used to read the local voice state synchronously. */
   selfUser: { id: string } | null;
   joinVoice: (guildId: string, channelId: string) => Promise<void>;
@@ -150,6 +156,7 @@ const initial = {
   voiceStates: {} as Record<string, VoiceState>,
   speaking: {},
   myVoice: null,
+  voicePreference: NO_PREFERENCE,
   selfUser: null,
   typing: {} as Record<string, TypingEntry[]>,
   bootstrapPromise: null,
@@ -485,15 +492,34 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   joinVoice: async (guildId, channelId) => {
-    // one in-flight transition at a time: a double-click must not build two meshes
     if (voiceTransition) return voiceTransition;
+    const currentVoice = get().myVoice;
+    if (currentVoice?.guildId === guildId && currentVoice.channelId === channelId) return;
     voiceTransition = (async () => {
+    if (currentVoice) {
+      stopVoiceMesh();
+      set((s) => {
+        const voiceStates = { ...s.voiceStates };
+        const selfId = s.selfUser?.id;
+        if (selfId) delete voiceStates[`${currentVoice.guildId}:${selfId}`];
+        return { voiceStates, myVoice: null, speaking: {} };
+      });
+      await api.voice.leave(currentVoice.guildId);
+    }
     const { state } = await api.voice.join(channelId);
     if (state.channelId !== channelId) return;
     set((s) => ({
       voiceStates: { ...s.voiceStates, [`${guildId}:${state.user.id}`]: state },
       myVoice: { guildId, channelId: state.channelId },
     }));
+    // the seat starts unmuted; a mic/sound choice made before the call still holds for this join
+    const preference = get().voicePreference;
+    if (preference.pending) {
+      set({ voicePreference: { ...preference, pending: false } });
+      await get()
+        .setSelfVoice({ selfMute: preference.selfMute, selfDeaf: preference.selfDeaf })
+        .catch(() => undefined);
+    }
     const channel = get().guildDetails[guildId]?.channels.find((entry) => entry.id === channelId);
     useNotificationStore.getState().notifyEvent(
       {
@@ -541,6 +567,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   setSelfVoice: async (input) => {
+    // out of a call the server has no seat to update: keep the choice for the next join
+    if (!get().myVoice) {
+      set((s) => ({ voicePreference: applyVoicePreference(s.voicePreference, input) }));
+      return;
+    }
     const mine = get().myVoice;
     const selfId = get().selfUser?.id;
     const selfState = mine && selfId ? get().voiceStates[`${mine.guildId}:${selfId}`] : undefined;
@@ -550,8 +581,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
     else if (input.selfDeaf === false && (selfState?.selfMute || selfState?.serverMute)) next.selfMute = true;
     else if (input.selfMute === false && (selfState?.selfDeaf || selfState?.serverDeaf)) return;
     const { state } = await api.voice.updateSelf(next);
-    // the mic track follows the authoritative server state
+    // the outgoing track and local playback follow the authoritative server state
     setSelfMuted(state.selfMute || state.serverMute);
+    setSelfDeafened(state.selfDeaf || state.serverDeaf);
     set((s) => ({ voiceStates: { ...s.voiceStates, [`${state.guildId}:${state.user.id}`]: state } }));
   },
 
@@ -774,7 +806,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
             event.states.map((state) => [`${state.guildId}:${state.user.id}`, state]),
           );
           for (const state of event.states) {
-            if (state.user.id !== currentUserId) {
+            if (state.user.id === currentUserId) {
+              setSelfMuted(state.selfMute || state.serverMute);
+              setSelfDeafened(state.selfDeaf || state.serverDeaf);
+            } else {
               setPlaybackMuted(state.user.id, state.serverMute || state.serverDeaf || state.selfDeaf);
             }
           }
@@ -801,10 +836,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
         break;
       case 'voice:state': {
         const { state } = event;
-        // server mute/deafen outranks the peer's own flags: they cannot undo it themselves
-        setPlaybackMuted(state.user.id, state.serverMute || state.serverDeaf || state.selfDeaf);
-        // someone else joined my call: the mesh must connect to them (and nobody else)
+        const before = get().voiceStates[`${state.guildId}:${state.user.id}`];
         const mine = get().myVoice;
+        if (!before && state.user.id !== currentUserId && mine?.guildId === state.guildId && mine.channelId === state.channelId) {
+          const notifications = useNotificationStore.getState();
+          if (notifications.prefs.soundsForCalls) playCue('join-call', notifications.prefs.volume);
+        }
+        if (state.user.id === currentUserId) {
+          setSelfMuted(state.selfMute || state.serverMute);
+          setSelfDeafened(state.selfDeaf || state.serverDeaf);
+        } else {
+          // server mute/deafen outranks the peer's own flags: they cannot undo it themselves
+          setPlaybackMuted(state.user.id, state.serverMute || state.serverDeaf || state.selfDeaf);
+        }
+        // someone else joined my call: the mesh must connect to them (and nobody else)
         if (state.user.id !== currentUserId && mine?.channelId === state.channelId) {
           const roster = { ...get().voiceStates, [`${state.guildId}:${state.user.id}`]: state };
           void reconcileVoiceMesh(state.channelId, peerIdsIn(roster, state.channelId, currentUserId));
@@ -816,10 +861,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }));
         break;
       }
-      case 'voice:leave':
+      case 'voice:leave': {
+        const existing = get().voiceStates[`${event.guildId}:${event.userId}`];
+        const mine = get().myVoice;
+        const leftActiveCall = !!existing && event.userId !== currentUserId && mine?.guildId === event.guildId && mine.channelId === event.channelId;
+        if (leftActiveCall) {
+          const notifications = useNotificationStore.getState();
+          if (notifications.prefs.soundsForCalls) playCue('leave-call', notifications.prefs.volume);
+        }
         set((s) => {
           const voiceStates = { ...s.voiceStates };
           delete voiceStates[`${event.guildId}:${event.userId}`];
+          const speaking = { ...s.speaking };
+          delete speaking[event.userId];
           const mine = s.myVoice;
           // drop the peer's media right away; a full sync would only trim the roster
           if (event.userId !== currentUserId && mine?.channelId === event.channelId) {
@@ -827,11 +881,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }
           return {
             voiceStates,
+            speaking,
             myVoice:
               mine && mine.guildId === event.guildId && event.userId === currentUserId ? null : s.myVoice,
           };
         });
         break;
+      }
       case 'ready':
         break;
     }

@@ -51,6 +51,21 @@ describe('file links are signed and short-lived', () => {
     expect(verifyFileSignature('segredo', 'a.png', { exp: exp, sig: 'x' }, now)).toBe(false);
   });
 
+  test('repeated serialization keeps a signed asset URL stable within its cache window', () => {
+    const now = 1_700_000_123_000;
+    const first = signedFilePath('segredo', '/files/a.png', now);
+    const later = signedFilePath('segredo', '/files/a.png', now + 30_000);
+
+    expect(first).toBe(later);
+    expect(first).toStartWith('/files/a.png?exp=');
+    const query = Object.fromEntries(new URLSearchParams(first!.split('?')[1]!));
+    const expiresAt = Number(query.exp) * 1000;
+    expect(verifyFileSignature('segredo', 'a.png', query, now)).toBe(true);
+    expect(verifyFileSignature('segredo', 'a.png', query, expiresAt - 1)).toBe(true);
+    expect(verifyFileSignature('segredo', 'a.png', query, expiresAt)).toBe(false);
+    expect(signedFilePath('segredo', '/files/a.png', now + FILE_URL_TTL_SECONDS * 1000)).not.toBe(first);
+  });
+
   test('only /files paths get signed', () => {
     expect(signedFilePath('segredo', '/files/a.png')).toStartWith('/files/a.png?exp=');
     expect(signedFilePath('segredo', '/avatars/a.png')).toBe('/avatars/a.png');
