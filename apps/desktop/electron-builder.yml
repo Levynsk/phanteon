@@ -1,0 +1,25 @@
+appId: com.phanteon.desktop
+productName: Phanteon
+# the npm name is scoped (`@phanteon/desktop`), unusable as a file name
+executableName: phanteon
+
+directories:
+  output: release
+
+# The renderer (vite) and the main process (bun) are pre-bundled, so runtime
+# dependencies are already inside dist/ and dist-electron/. Keep electron-builder
+# from copying the whole workspace node_modules into the asar.
+npmRebuild: false
+files:
+  - dist/**
+  - dist-electron/**
+  - package.json
+  - '!**/node_modules/**'
+
+linux:
+  target:
+    - AppImage
+  category: Network;InstantMessaging
+  synopsis: Phanteon desktop client
+  mimeTypes:
+    - x-scheme-handler/phanteon

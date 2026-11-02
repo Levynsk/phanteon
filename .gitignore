@@ -1,0 +1,17 @@
+# dependencies
+node_modules
+
+# build outputs
+dist
+dist-electron
+apps/*/dist
+apps/*/dist-electron
+apps/desktop/release
+
+# local runtime data (SQLite + uploads)
+apps/server/data
+
+# archives and logs
+*.log
+*.zip
+.DS_Store

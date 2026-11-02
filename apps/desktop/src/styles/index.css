@@ -1,0 +1,554 @@
+@import 'tailwindcss';
+
+/*
+ * Design tokens. Components only use these semantic tokens (via Tailwind
+ * utilities such as `bg-surface`, `text-muted`, `bg-brand`) so the palette can
+ * be swapped in one place.
+ */
+@theme {
+  --font-sans:
+    'gg sans', 'Noto Sans', 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+
+  /*
+   * Every colour below resolves through a `data-theme` block at the end of this
+   * file. Components only ever use the semantic names (`bg-surface`, `text-muted`,
+   * `bg-brand`), so adding a theme means adding one block of variables.
+   */
+  --color-app: var(--theme-app);
+  --color-surface: var(--theme-surface);
+  --color-surface-alt: var(--theme-surface-alt);
+  --color-chat: var(--theme-chat);
+  --color-elevated: var(--theme-elevated);
+  --color-input: var(--theme-input);
+  /* darker than `input` so a field inside a card still reads as a field */
+  --color-input-sunken: var(--theme-input-sunken);
+
+  /* overlays */
+  --color-hover: var(--theme-hover);
+  --color-active: var(--theme-active);
+  --color-selected: var(--theme-selected);
+  /* hairline above menus and panels, and the subtle fills used inside cards.
+     They follow the text colour so the same class reads on light and dark. */
+  --color-line: var(--theme-line);
+  --color-line-strong: var(--theme-line-strong);
+  --color-tint: var(--theme-tint);
+  --color-tint-strong: var(--theme-tint-strong);
+  /* switch knob and its contrast ring: white on dark themes, outlined on light */
+  --color-switch-thumb: var(--theme-switch-thumb);
+  --color-switch-thumb-ring: var(--theme-switch-thumb-ring);
+
+  /* tinted so secondary buttons and neutral badges never lift a panel to grey */
+  --color-white: var(--theme-white);
+
+  /* text that sits on imagery (avatars, banners, screen shares): always light */
+  --color-on-image: #ffffff;
+  --color-scrim: rgb(0 0 0 / 0.6);
+
+  /* text */
+  --color-normal: var(--theme-normal);
+  --color-heading: var(--theme-heading);
+  --color-muted: var(--theme-muted);
+  --color-faint: var(--theme-faint);
+  --color-link: var(--theme-link);
+
+  /* brand accent & status */
+  --color-brand: var(--theme-brand);
+  --color-brand-hover: var(--theme-brand-hover);
+  --color-brand-soft: var(--theme-brand-soft);
+  --color-on-brand: var(--theme-on-brand);
+  --color-green: var(--theme-green);
+  --color-green-hover: var(--theme-green-hover);
+  --color-yellow: var(--theme-yellow);
+  --color-warn: var(--theme-warn);
+  --color-red: var(--theme-red);
+  --color-red-hover: var(--theme-red-hover);
+
+  /* lines */
+  --color-divider: var(--theme-divider);
+  --color-outline: var(--theme-outline);
+  /* raised panel used by menus, cards and embeds; separate from `elevated` so
+     a theme can keep menus readable without changing every surface */
+  --color-panel: var(--theme-panel);
+  --color-app-alt: var(--theme-app-alt);
+  --color-sidebar: var(--theme-sidebar);
+  --color-panel-hover: var(--theme-panel-hover);
+
+  --radius-xs: 3px;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  --shadow-elevated: 0 8px 24px rgb(0 0 0 / 0.45), 0 2px 6px rgb(0 0 0 / 0.3);
+  --shadow-popover: 0 12px 36px rgb(0 0 0 / 0.55);
+  --shadow-scrim: 0 1px 3px rgb(0 0 0 / 0.45);
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    overflow: hidden;
+    font-family: var(--font-sans);
+    background: var(--color-app);
+    color: var(--color-normal);
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+  }
+
+  input,
+  textarea,
+  [contenteditable='true'],
+  .selectable {
+    user-select: text;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-outline);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: var(--theme-selection);
+    color: var(--color-heading);
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--theme-scrollbar);
+    border-radius: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+@layer components {
+  .drag-region {
+    -webkit-app-region: drag;
+  }
+
+  .no-drag {
+    -webkit-app-region: no-drag;
+  }
+
+  .mention {
+    background: var(--color-brand-soft);
+    color: var(--color-brand);
+    border-radius: 3px;
+    padding: 0 2px;
+    font-weight: 500;
+  }
+}
+
+/* Small white slider inside call cards: only visible on hover, thumb never crowds the track. */
+.tile-volume {
+  appearance: none;
+  background: transparent;
+}
+.tile-volume::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 2px;
+  background: rgb(255 255 255 / 0.35);
+}
+.tile-volume::-webkit-slider-thumb {
+  appearance: none;
+  width: 10px;
+  height: 10px;
+  margin-top: -3.5px;
+  border-radius: 999px;
+  background: var(--color-on-image);
+  box-shadow: 0 0 0 2px rgb(0 0 0 / 0.25);
+}
+.tile-volume::-moz-range-track {
+  height: 3px;
+  border-radius: 2px;
+  background: rgb(255 255 255 / 0.35);
+}
+.tile-volume::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--color-on-image);
+}
+
+@keyframes presence-typing {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.5;
+  }
+  30% {
+    transform: translateY(-3px);
+    opacity: 1;
+  }
+}
+
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes content-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/*
+ * Themes. `data-theme` lives on <html> and is written by the theme store, so a
+ * switch applies instantly with no reload. Order matters only for the default.
+ *
+ * Every theme sets the same keys. `line`/`line-strong`/`tint`/`tint-strong` are
+ * hairline and card fills derived from the text colour, so components never
+ * need `border-white/5` (invisible on a light theme) or `bg-black/60` (which
+ * paints a dark block on a light panel).
+ */
+:root,
+[data-theme='oled'] {
+  --theme-app: #000000;
+  --theme-sidebar: #000000;
+  /* settings rail / list columns: true black on OLED, so lists read as OLED |
+     they are separated by dividers, never by a lighter fill */
+  --theme-app-alt: #000000;
+  --theme-surface: #000000;
+  --theme-surface-alt: #000000;
+  --theme-chat: #000000;
+  --theme-elevated: #000000;
+  --theme-panel: #2b2d31;
+  --theme-panel-hover: #313338;
+  --theme-input: #101012;
+  --theme-input-sunken: #060607;
+  --theme-hover: rgb(255 255 255 / 0.06);
+  --theme-active: rgb(255 255 255 / 0.1);
+  --theme-selected: rgb(255 255 255 / 0.1);
+  --theme-white: rgb(255 255 255 / 0.08);
+  --theme-line: rgb(255 255 255 / 0.06);
+  --theme-line-strong: rgb(255 255 255 / 0.16);
+  --theme-tint: rgb(255 255 255 / 0.03);
+  --theme-tint-strong: rgb(255 255 255 / 0.08);
+  --theme-normal: #e4e4e7;
+  --theme-heading: #fafafa;
+  --theme-muted: #9a9aa3;
+  --theme-faint: #6b6b74;
+  --theme-link: #fbbf24;
+  --theme-brand: #fbbf24;
+  --theme-brand-hover: #fcd34d;
+  --theme-brand-soft: rgb(251 191 36 / 0.14);
+  --theme-on-brand: #0a0a0b;
+  --theme-green: #4ade80;
+  --theme-green-hover: #6ee7a0;
+  --theme-yellow: #fbbf24;
+  --theme-warn: #f0b232;
+  --theme-red: #f87171;
+  --theme-red-hover: #ef4444;
+  --theme-divider: #1c1c1f;
+  --theme-outline: #fbbf24;
+  --theme-selection: rgb(251 191 36 / 0.3);
+  --theme-scrollbar: rgb(255 255 255 / 0.14);
+  --theme-star-dim: rgb(255 255 255 / 0.22);
+  --theme-star: rgb(255 255 255 / 0.45);
+  --theme-star-bright: rgb(255 255 255 / 0.85);
+  --theme-star-trail: rgb(255 255 255 / 0.12);
+  --theme-star-trail-mid: rgb(255 255 255 / 0.3);
+  --theme-star-trail-head: rgb(255 255 255 / 0.65);
+  --theme-switch-thumb: #ffffff;
+  --theme-switch-thumb-ring: rgb(0 0 0 / 0.2);
+  color-scheme: dark;
+}
+
+/* Discord's regular dark theme: lifted panels, same yellow accent. */
+[data-theme='dark'] {
+  --theme-app: #1e1f22;
+  --theme-app-alt: #232428;
+  --theme-surface: #2b2d31;
+  /* list columns share the guild rail colour; the chat panel above is lighter */
+  --theme-sidebar: #2b2d31;
+  --theme-surface-alt: #232428;
+  --theme-chat: #313338;
+  --theme-elevated: #383a40;
+  --theme-panel: #2b2d31;
+  --theme-panel-hover: #35373c;
+  --theme-input: #1e1f22;
+  --theme-input-sunken: #111214;
+  --theme-hover: rgb(78 80 88 / 0.48);
+  --theme-active: rgb(78 80 88 / 0.64);
+  --theme-selected: rgb(78 80 88 / 0.6);
+  --theme-white: rgb(255 255 255 / 0.08);
+  --theme-line: rgb(255 255 255 / 0.06);
+  --theme-line-strong: rgb(255 255 255 / 0.16);
+  --theme-tint: rgb(255 255 255 / 0.03);
+  --theme-tint-strong: rgb(255 255 255 / 0.08);
+  --theme-normal: #dbdee1;
+  --theme-heading: #f2f3f5;
+  --theme-muted: #949ba4;
+  --theme-faint: #80848e;
+  --theme-link: #fbbf24;
+  --theme-brand: #fbbf24;
+  --theme-brand-hover: #fcd34d;
+  --theme-brand-soft: rgb(251 191 36 / 0.16);
+  --theme-on-brand: #0a0a0b;
+  --theme-green: #23a55a;
+  --theme-green-hover: #1e9a52;
+  --theme-yellow: #fbbf24;
+  --theme-warn: #e8a12b;
+  --theme-red: #f23f42;
+  --theme-red-hover: #d83c3e;
+  --theme-divider: #26272b;
+  --theme-outline: #fbbf24;
+  --theme-selection: rgb(251 191 36 / 0.35);
+  --theme-scrollbar: rgb(30 31 34 / 0.6);
+  --theme-star-dim: rgb(255 255 255 / 0.22);
+  --theme-star: rgb(255 255 255 / 0.45);
+  --theme-star-bright: rgb(255 255 255 / 0.85);
+  --theme-star-trail: rgb(255 255 255 / 0.12);
+  --theme-star-trail-mid: rgb(255 255 255 / 0.3);
+  --theme-star-trail-head: rgb(255 255 255 / 0.65);
+  --theme-switch-thumb: #ffffff;
+  --theme-switch-thumb-ring: rgb(0 0 0 / 0.2);
+  color-scheme: dark;
+}
+
+/* Light theme: low-contrast greys like Discord Light, yellow kept as accent. */
+[data-theme='light'] {
+  /* the rail and the settings rail sit on a light grey so neither blends into a white panel */
+  --theme-app: #dbdee2;
+  --theme-app-alt: #f2f3f5;
+  --theme-surface: #ffffff;
+  --theme-sidebar: #f2f3f5;
+  --theme-surface-alt: #f2f3f5;
+  --theme-chat: #ffffff;
+  --theme-elevated: #ffffff;
+  --theme-panel: #f2f3f5;
+  --theme-panel-hover: #e8eaed;
+  --theme-input: #ebedef;
+  --theme-input-sunken: #e3e5e8;
+  --theme-hover: rgb(6 6 7 / 0.05);
+  --theme-active: rgb(6 6 7 / 0.08);
+  --theme-selected: rgb(6 6 7 / 0.1);
+  --theme-white: rgb(6 6 7 / 0.08);
+  /* ink hairlines: the white-alpha lines of the dark themes vanish on white */
+  --theme-line: rgb(6 6 7 / 0.08);
+  --theme-line-strong: rgb(6 6 7 / 0.2);
+  --theme-tint: rgb(6 6 7 / 0.03);
+  --theme-tint-strong: rgb(6 6 7 / 0.07);
+  --theme-normal: #2e3338;
+  --theme-heading: #060607;
+  --theme-muted: #5c5e66;
+  --theme-faint: #80848e;
+  /* links use the accent so they stay readable (Discord Blurple would clash here) */
+  --theme-link: #b45309;
+  --theme-brand: #eab308;
+  --theme-brand-hover: #ca8a04;
+  --theme-brand-soft: rgb(234 179 8 / 0.18);
+  --theme-on-brand: #1a1a1a;
+  --theme-green: #248046;
+  --theme-green-hover: #1a6334;
+  --theme-yellow: #b45309;
+  --theme-warn: #c27c0e;
+  --theme-red: #da373c;
+  --theme-red-hover: #a12828;
+  --theme-divider: #dcdee1;
+  --theme-outline: #ca8a04;
+  --theme-selection: rgb(234 179 8 / 0.35);
+  --theme-scrollbar: rgb(6 6 7 / 0.2);
+  /* dark stars on the pale sky behind the sign-in column */
+  --theme-star-dim: rgb(6 6 7 / 0.18);
+  --theme-star: rgb(6 6 7 / 0.38);
+  --theme-star-bright: rgb(6 6 7 / 0.72);
+  --theme-star-trail: rgb(6 6 7 / 0.08);
+  --theme-star-trail-mid: rgb(6 6 7 / 0.22);
+  --theme-star-trail-head: rgb(6 6 7 / 0.55);
+  /* a white disc on a white panel disappears: the thumb is ink here */
+  --theme-switch-thumb: #ffffff;
+  --theme-switch-thumb-ring: rgb(6 6 7 / 0.45);
+  color-scheme: light;
+}
+
+/* Gruvbox Dark: warm browns, cream text, the palette's aqua as accent. */
+[data-theme='gruvbox'] {
+  --theme-app: #1d2021;
+  --theme-app-alt: #282828;
+  --theme-surface: #282828;
+  --theme-sidebar: #2f2d2c;
+  --theme-surface-alt: #32302f;
+  --theme-chat: #32302f;
+  --theme-elevated: #3c3836;
+  --theme-panel: #282828;
+  --theme-panel-hover: #3c3836;
+  --theme-input: #1d2021;
+  --theme-input-sunken: #141617;
+  --theme-hover: rgb(235 219 178 / 0.07);
+  --theme-active: rgb(235 219 178 / 0.11);
+  --theme-selected: rgb(235 219 178 / 0.11);
+  --theme-white: rgb(235 219 178 / 0.08);
+  --theme-line: rgb(235 219 178 / 0.07);
+  --theme-line-strong: rgb(235 219 178 / 0.18);
+  --theme-tint: rgb(235 219 178 / 0.035);
+  --theme-tint-strong: rgb(235 219 178 / 0.09);
+  --theme-normal: #ebdbb2;
+  --theme-heading: #fbf1c7;
+  --theme-muted: #a89984;
+  --theme-faint: #928374;
+  --theme-link: #83a598;
+  --theme-brand: #83a598;
+  --theme-brand-hover: #a5c8c0;
+  --theme-brand-soft: rgb(131 165 152 / 0.16);
+  --theme-on-brand: #1d2021;
+  --theme-green: #b8bb26;
+  --theme-green-hover: #d5d95a;
+  --theme-yellow: #fabd2f;
+  --theme-warn: #fe8019;
+  --theme-red: #fb4934;
+  --theme-red-hover: #b12a1f;
+  --theme-divider: #3c3836;
+  --theme-outline: #83a598;
+  --theme-selection: rgb(131 165 152 / 0.3);
+  --theme-scrollbar: rgb(235 219 178 / 0.14);
+  --theme-star-dim: rgb(235 219 178 / 0.22);
+  --theme-star: rgb(254 128 25 / 0.5);
+  --theme-star-bright: rgb(250 189 47 / 0.9);
+  --theme-star-trail: rgb(131 165 152 / 0.12);
+  --theme-star-trail-mid: rgb(131 165 152 / 0.32);
+  --theme-star-trail-head: rgb(131 165 152 / 0.7);
+  --theme-switch-thumb: #fbf1c7;
+  --theme-switch-thumb-ring: rgb(0 0 0 / 0.35);
+  color-scheme: dark;
+}
+
+/* Sangue: oxblood panels, bone text, crimson accent. */
+[data-theme='bloody'] {
+  --theme-app: #0a0708;
+  --theme-app-alt: #140c0e;
+  --theme-sidebar: #1a0e11;
+  --theme-surface: #170b0d;
+  --theme-surface-alt: #1d0f12;
+  --theme-chat: #120a0c;
+  --theme-elevated: #241316;
+  --theme-panel: #170b0d;
+  --theme-panel-hover: #241316;
+  --theme-input: #0e0708;
+  --theme-input-sunken: #070405;
+  --theme-hover: rgb(255 90 90 / 0.08);
+  --theme-active: rgb(255 90 90 / 0.13);
+  --theme-selected: rgb(255 90 90 / 0.13);
+  --theme-white: rgb(255 200 200 / 0.08);
+  --theme-line: rgb(255 120 120 / 0.09);
+  --theme-line-strong: rgb(255 120 120 / 0.22);
+  --theme-tint: rgb(255 90 90 / 0.04);
+  --theme-tint-strong: rgb(255 90 90 / 0.1);
+  --theme-normal: #e8d6d2;
+  --theme-heading: #fbeae6;
+  --theme-muted: #a98e8c;
+  --theme-faint: #7d6766;
+  --theme-link: #ff7a7a;
+  --theme-brand: #e0212f;
+  --theme-brand-hover: #ff3b47;
+  --theme-brand-soft: rgb(224 33 47 / 0.18);
+  --theme-on-brand: #fff5f3;
+  --theme-green: #5fbf8a;
+  --theme-green-hover: #79d1a0;
+  --theme-yellow: #e8b04b;
+  --theme-warn: #e8903b;
+  /* the danger red is lighter than the brand so a delete action still stands out */
+  --theme-red: #ff8a7a;
+  --theme-red-hover: #e0685a;
+  --theme-divider: #26151a;
+  --theme-outline: #ff5a5a;
+  --theme-selection: rgb(224 33 47 / 0.35);
+  --theme-scrollbar: rgb(255 120 120 / 0.16);
+  --theme-star-dim: rgb(255 200 200 / 0.16);
+  --theme-star: rgb(255 120 120 / 0.4);
+  --theme-star-bright: rgb(255 220 220 / 0.8);
+  --theme-star-trail: rgb(255 90 90 / 0.1);
+  --theme-star-trail-mid: rgb(255 90 90 / 0.28);
+  --theme-star-trail-head: rgb(255 140 140 / 0.6);
+  --theme-switch-thumb: #fff0ee;
+  --theme-switch-thumb-ring: rgb(0 0 0 / 0.4);
+  color-scheme: dark;
+}
+
+/* Floresta: mossy greens and birch bark, amber for anything that needs attention. */
+[data-theme='forest'] {
+  --theme-app: #131a14;
+  --theme-app-alt: #18211a;
+  --theme-sidebar: #1e2820;
+  --theme-surface: #1b241d;
+  --theme-surface-alt: #1f2a21;
+  --theme-chat: #1f2a21;
+  --theme-elevated: #263227;
+  --theme-panel: #1b241d;
+  --theme-panel-hover: #263227;
+  --theme-input: #141c16;
+  --theme-input-sunken: #0d130f;
+  --theme-hover: rgb(220 230 200 / 0.06);
+  --theme-active: rgb(220 230 200 / 0.1);
+  --theme-selected: rgb(220 230 200 / 0.1);
+  --theme-white: rgb(220 230 200 / 0.08);
+  --theme-line: rgb(220 230 200 / 0.07);
+  --theme-line-strong: rgb(220 230 200 / 0.18);
+  --theme-tint: rgb(220 230 200 / 0.035);
+  --theme-tint-strong: rgb(220 230 200 / 0.09);
+  --theme-normal: #d5ddcd;
+  --theme-heading: #eff4e9;
+  --theme-muted: #93a08c;
+  --theme-faint: #71806c;
+  --theme-link: #a8c48a;
+  --theme-brand: #a8c48a;
+  --theme-brand-hover: #c3dda6;
+  --theme-brand-soft: rgb(168 196 138 / 0.16);
+  --theme-on-brand: #131a14;
+  --theme-green: #8fbf6a;
+  --theme-green-hover: #a9d289;
+  --theme-yellow: #e0b35c;
+  --theme-warn: #d99a4e;
+  --theme-red: #e07a5f;
+  --theme-red-hover: #c26248;
+  --theme-divider: #2a362c;
+  --theme-outline: #a8c48a;
+  --theme-selection: rgb(168 196 138 / 0.3);
+  --theme-scrollbar: rgb(220 230 200 / 0.14);
+  /* fireflies over the meadow */
+  --theme-star-dim: rgb(220 230 200 / 0.16);
+  --theme-star: rgb(224 179 92 / 0.4);
+  --theme-star-bright: rgb(242 214 140 / 0.8);
+  --theme-star-trail: rgb(168 196 138 / 0.1);
+  --theme-star-trail-mid: rgb(168 196 138 / 0.28);
+  --theme-star-trail-head: rgb(200 220 160 / 0.6);
+  --theme-switch-thumb: #eff4e9;
+  --theme-switch-thumb-ring: rgb(0 0 0 / 0.35);
+  color-scheme: dark;
+}

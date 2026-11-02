@@ -1,0 +1,31 @@
+{
+  "name": "phanteon",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "start": "bun server.ts",
+    "dev": "bun --filter '@phanteon/server' dev",
+    "dev:desktop": "bun --filter '@phanteon/desktop' dev",
+    "build": "bun --filter '@phanteon/desktop' build",
+    "appimage": "bun --filter '@phanteon/desktop' appimage",
+    "db:seed": "bun --filter '@phanteon/server' db:seed",
+    "test": "bun run test:server && bun run test:desktop",
+    "test:server": "bun --filter '@phanteon/server' test",
+    "test:desktop": "bun --filter '@phanteon/desktop' test",
+    "typecheck": "bun run typecheck:shared && bun run typecheck:server && bun run typecheck:desktop && bun run typecheck:electron && bun run typecheck:root",
+    "typecheck:shared": "bun --filter '@phanteon/shared' typecheck",
+    "typecheck:server": "bun --filter '@phanteon/server' typecheck",
+    "typecheck:desktop": "bun --filter '@phanteon/desktop' typecheck",
+    "typecheck:electron": "bun --filter '@phanteon/desktop' typecheck:electron",
+    "typecheck:root": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.0",
+    "typescript": "^5.9.0"
+  }
+}

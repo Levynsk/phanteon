@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="pt-BR" data-theme="oled">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; media-src 'self' blob: remote:; img-src 'self' data: blob: remote:; connect-src 'self' remote: https: wss: http: ws:; font-src 'self' data:"
+    />
+    <title>Phanteon</title>
+    <script>
+      // apply the saved theme before the first paint (the bundle would otherwise flash the default)
+      try {
+        var saved = JSON.parse(localStorage.getItem('phanteon-theme') || '{}');
+        var theme = saved && saved.state && saved.state.theme;
+        if (['oled', 'dark', 'light', 'gruvbox', 'bloody', 'forest'].indexOf(theme) !== -1) {
+          document.documentElement.dataset.theme = theme;
+        }
+      } catch (error) {
+        /* keep the default */
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
