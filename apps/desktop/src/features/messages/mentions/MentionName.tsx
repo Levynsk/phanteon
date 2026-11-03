@@ -1,7 +1,6 @@
 import type { LucideIcon } from 'lucide-react';
 import { Hash, Volume2 } from 'lucide-react';
 import type { ReactNode } from 'react';
-import type { UserStatus } from '@phanteon/shared';
 import { useChatStore } from '../../../app/stores/chat';
 import { Avatar } from '../../../components/ui/Avatar';
 import { cn } from '../../../lib/cn';
@@ -67,58 +66,51 @@ export function MentionChip({
 }) {
   const user = targets.find((target) => target.kind === 'user' && target.name === name)?.user;
   const channel = targets.find((target) => target.kind === 'channel' && target.name === name);
-  const online = useChatStore((state) => (user ? (state.online[user.id] ?? false) : false));
-  const presence = useChatStore((state) => (user ? (state.presence[user.id] ?? 'online') : 'online'));
   if (user) {
-    const status: UserStatus = online ? presence : 'offline';
-    return (
-      <span
-        className={cn(
-          'mention-chip inline-flex max-w-full items-center align-middle',
-          // the chip is inline-flex, which sits on the baseline: nudge it onto the text line
-          mirror ? 'relative -mb-px -mt-px gap-1 rounded-[3px] py-0 align-bottom leading-[inherit]' : 'translate-y-[2px] gap-1 rounded-sm py-0 leading-snug',
-        )}
-      >
-        <span className={cn('relative inline-flex shrink-0', mirror && 'size-4')}>
-          <Avatar name={user.displayName} src={user.avatarUrl} color={user.accentColor} size="xs" className="size-4 text-[8px]" />
-          <StatusDots status={status} />
-        </span>
-        {/* the mirror reserves the characters behind the chip, so nothing after it drifts */}
-        {mirror ? (
-          <span className="absolute inset-0 -z-10 rounded-[3px] bg-brand-soft ring-1 ring-brand/40" aria-hidden />
-        ) : null}
-        {mirror && token ? (
-          // inline-block hides it yet keeps its exact width, so the caret after the mention
-          // lands where the next typed character appears
-          <span className="inline-block text-transparent" aria-hidden>
-            <span className="whitespace-pre">{token}</span>
+    if (mirror) {
+      // the textarea's own text sits under this mirror, so the chip covers it and the token
+      // stays laid out invisibly: everything keeps the metrics it was typed with
+      return (
+        <span className="relative inline-block align-top">
+          <span className="invisible whitespace-pre">{token}</span>
+          <span className="absolute left-0 top-0 inline-flex h-full max-w-full items-center gap-1 rounded-[3px] bg-brand-soft px-1 text-brand">
+            <span className="relative inline-flex shrink-0">
+              <Avatar name={user.displayName} src={user.avatarUrl} color={user.accentColor} size="xs" className="size-4 text-[8px]" />
+            </span>
+            <span className="min-w-0 truncate">{name}</span>
           </span>
-        ) : null}
-        <span className="truncate">{name}</span>
+        </span>
+      );
+    }
+    return (
+      <span className="mention-chip inline-flex max-w-full items-center gap-1 rounded-sm py-0 align-middle leading-snug">
+        <span className="relative inline-flex shrink-0">
+          <Avatar name={user.displayName} src={user.avatarUrl} color={user.accentColor} size="xs" className="size-4 text-[8px]" />
+        </span>
+        <span className="min-w-0 truncate">{name}</span>
       </span>
     );
   }
   if (channel) {
+    if (mirror) {
+      return (
+        <span className="relative inline-block align-top">
+          <span className="invisible whitespace-pre">{token}</span>
+          <span className="absolute left-0 top-0 inline-flex h-full max-w-full items-center gap-0.5 rounded-[3px] bg-brand-soft px-1 text-brand">
+            <ChannelIcon voice={channel.channel} size={13} />
+            <span className="min-w-0 truncate">{name}</span>
+          </span>
+        </span>
+      );
+    }
     return (
-      <span className={cn('mention-chip inline-flex max-w-full items-center gap-0.5 rounded-sm px-0.5 align-middle', mirror ? 'leading-[inherit]' : 'leading-snug')}>
+      <span className="mention-chip inline-flex max-w-full items-center gap-0.5 rounded-sm px-0.5 align-middle leading-snug">
         <ChannelIcon voice={channel.channel} size={13} className="text-brand" />
-        <span className="truncate">{name}</span>
+        <span className="min-w-0 truncate">{name}</span>
       </span>
     );
   }
   return <span className="mention">{name}</span>;
-}
-
-/** Presence dot painted over the tiny avatar; it is decoration, the status is read in the member list. */
-function StatusDots({ status }: { status: UserStatus }) {
-  const color =
-    status === 'online' ? 'bg-green' : status === 'idle' ? 'bg-yellow' : status === 'dnd' ? 'bg-red' : 'bg-muted';
-  return (
-    <span
-      className={cn('absolute -bottom-0.5 -right-0.5 size-1.5 rounded-full ring-2 ring-chat', color)}
-      aria-hidden
-    />
-  );
 }
 
 /** Highlights where the typed text matched inside a suggestion row. */

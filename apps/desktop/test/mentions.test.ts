@@ -36,6 +36,15 @@ describe('the @ / # being typed', () => {
     expect(activeMention('@', 1)).toMatchObject({ query: '', kind: 'user' });
   });
 
+  test('a space after a picked mention closes the list, and new text does not reopen it', () => {
+    const atoms = ['@Ana Lima'];
+    expect(activeMention('@Ana Lima ', 10, { atoms })).toBeNull();
+    // plain words are not a mention, so nothing is being picked while typing them
+    expect(activeMention('@Ana Lima oi', 12, { atoms })).toBeNull();
+    // a new trigger after the finished mention opens a new list
+    expect(activeMention('@Ana Lima oi #ge', 16, { atoms })).toMatchObject({ start: 13, query: 'ge' });
+  });
+
   test('a mention already picked is never read back as a query', () => {
     const text = 'oi @Ana Lima e #geral';
     const atoms = ['@Ana Lima', '#geral'];

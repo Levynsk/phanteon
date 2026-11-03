@@ -51,13 +51,18 @@ function isBoundary(text: string, index: number): boolean {
  */
 export function activeMention(text: string, caret: number, options: { atoms?: string[] } = {}): MentionQuery | null {
   const position = Math.min(Math.max(0, caret), text.length);
-  for (const atom of options.atoms ?? []) {
-    const start = position - atom.length;
-    // at the end of the text there is no next character to break on, so any atom there counts
-    if (start >= 0 && text.startsWith(atom, start) && (start === 0 || /\s/.test(text[start - 1] ?? ''))) return null;
+  const mentions = options.atoms ?? [];
+  let lastMentionEnd = -1;
+  for (const atom of mentions) {
+    for (let at = text.indexOf(atom); at >= 0; at = text.indexOf(atom, at + 1)) {
+      if ((at === 0 || /\s/.test(text[at - 1] ?? '')) && at < position && position <= at + atom.length) return null;
+      if ((at === 0 || /\s/.test(text[at - 1] ?? '')) && at + atom.length < position) {
+        lastMentionEnd = Math.max(lastMentionEnd, at + atom.length);
+      }
+    }
   }
   let index = position - 1;
-  while (index >= 0 && QUERY_CHAR.test(text[index] ?? '')) index -= 1;
+  while (index >= 0 && index >= lastMentionEnd && QUERY_CHAR.test(text[index] ?? '')) index -= 1;
   const trigger = text[index];
   if (index < 0 || (trigger !== '@' && trigger !== '#')) return null;
   if (!isBoundary(text, index)) return null;
@@ -84,13 +89,6 @@ export function mentionSuggestions(targets: MentionTarget[], query: MentionQuery
 /** UTF-16 length, the unit the message limit and the UI counter share. */
 export function codeUnits(text: string): number {
   return text.length;
-}
-
-/** The text with every finished mention taken out as one unit; it is what the mirror measures. */
-export function textWithoutMentions(text: string, atoms: string[]): string {
-  let rest = text;
-  for (const atom of [...atoms].sort((a, b) => b.length - a.length)) rest = rest.split(atom).join('');
-  return rest;
 }
 
 /** Targets just for the names inside `tokens`, so the composer can highlight what it just inserted. */

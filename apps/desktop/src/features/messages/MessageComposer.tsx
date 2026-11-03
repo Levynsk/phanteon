@@ -20,7 +20,6 @@ import {
   codeUnits,
   mentionToken,
   textTargets,
-  textWithoutMentions,
   type MentionSpan,
   type MentionTarget,
 } from '../../lib/mentions';
@@ -78,8 +77,6 @@ export function MessageComposer({ channelId, placeholder = 'Enviar mensagem…' 
   const online = useChatStore((state) => state.online);
   const presence = useChatStore((state) => state.presence);
   const chips = useMemo(() => textTargets(guild, mentions.map((span) => span.token)), [guild, mentions]);
-  // the mirror shows the text without the picked tokens, which are drawn as chips beside it
-  const mirrorText = useMemo(() => textWithoutMentions(value, mentions.map((span) => span.token)), [value, mentions]);
   // the input re-renders with the finished mention highlighted, like the message it will become
   const backdropRef = useRef<HTMLDivElement>(null);
 
@@ -311,9 +308,8 @@ export function MessageComposer({ channelId, placeholder = 'Enviar mensagem…' 
             onClick={() => fileInputRef.current?.click()}
           />
           {/*
-            Mirror of the textarea: same box, same font metrics, the text transparent. Dropping the
-            mention tokens leaves every other character at the top-left corner of the input, so the
-            typed text and the mention chip never share space or drift.
+            Mirror of the textarea: same box, same font metrics. The typed text stays transparent and
+            each picked mention is drawn over its own characters, which keep their width.
           */}
           <div className="relative min-h-[38px] flex-1">
             {listOpen ? (
@@ -329,7 +325,7 @@ export function MessageComposer({ channelId, placeholder = 'Enviar mensagem…' 
             ) : null}
             <div ref={backdropRef} aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
               <div className="min-h-[38px] w-full whitespace-pre-wrap break-words px-1 py-[9px] text-[15px] leading-[1.375rem] text-normal [overflow-wrap:anywhere]">
-                {chips.length > 0 ? <MessageContent content={mirrorText} targets={chips} mirror /> : mirrorText}
+                <MessageContent content={value} targets={chips} mirror />
                 {'\u200b'}
               </div>
             </div>

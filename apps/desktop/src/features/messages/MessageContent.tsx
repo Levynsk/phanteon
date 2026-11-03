@@ -35,8 +35,7 @@ function renderInline(text: string, keyPrefix: string, options: InlineOptions): 
   const pushMentions = (plain: string) => {
     splitMentions(plain, targets).forEach((token, index) => {
       if (token.type === 'text') {
-        // in the mirror the text is invisible but keeps its width, so the caret lines up
-        if (token.value) nodes.push(mirror ? <span key={`${keyPrefix}-${lastIndex}-t${index}`} className="text-transparent">{token.value}</span> : token.value);
+        if (token.value) nodes.push(token.value);
       } else {
         nodes.push(
           <MentionChip
@@ -44,6 +43,7 @@ function renderInline(text: string, keyPrefix: string, options: InlineOptions): 
             name={token.name}
             targets={targets}
             mirror={mirror}
+            token={`${token.kind === 'user' ? '@' : '#'}${token.name}`}
           />,
         );
       }
@@ -98,7 +98,6 @@ export function MessageContent({ content, className, targets = [], mirror = fals
     <div
       className={cn(
         'selectable min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere] text-[15px] leading-[1.375rem] text-normal',
-        mirror && 'text-transparent',
         className,
       )}
     >
