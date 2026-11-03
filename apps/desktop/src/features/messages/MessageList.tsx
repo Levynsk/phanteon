@@ -24,6 +24,7 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator,
 import { ReplyQuote } from './ReplyPreview';
 import { MessageComposer } from './MessageComposer';
 import { MessageContent } from './MessageContent';
+import { useMentionTargets } from './mentions/MentionName';
 import { MessageAttachments } from './MessageAttachments';
 import { extractLinks, LinkEmbeds } from './LinkEmbeds';
 
@@ -229,6 +230,7 @@ export function MessageItem({
   const toggleReaction = useChatStore((state) => state.toggleReaction);
   const canReact = useChatStore((state) => canInChannel(state, message.channelId, Permission.AddReactions));
   const openUserProfile = useUiStore((state) => state.openUserProfile);
+  const mentionTargets = useMentionTargets(guildId);
   const actions = useMessageActions(message, own, onStartEdit);
 
   return (
@@ -279,7 +281,9 @@ export function MessageItem({
           <MessageEditForm message={message} onCancel={onStopEdit} onSaved={onStopEdit} />
         ) : (
           <>
-            {message.content ? <MessageContent content={message.content} className="text-[15px] leading-[1.375rem]" /> : null}
+            {message.content ? (
+              <MessageContent content={message.content} targets={mentionTargets} className="text-[15px] leading-[1.375rem]" />
+            ) : null}
             {message.content ? <MessageEmbeds content={message.content} /> : null}
             {message.editedAt ? <span className="ml-1 text-[10px] text-faint">(editado)</span> : null}
             {message.attachments.length > 0 ? <MessageAttachments attachments={message.attachments} /> : null}

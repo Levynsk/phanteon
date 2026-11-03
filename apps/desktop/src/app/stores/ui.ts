@@ -46,6 +46,16 @@ export interface PersonMenu {
   onProfile: () => void;
 }
 
+/** A typed `@user` or `#channel` to insert in the composer; `start`/`end` cover the typed text. */
+export interface PendingMention {
+  kind: 'user' | 'channel';
+  /** The mention token as it is stored and displayed: `@Display Name` or `#channel-name`. */
+  token: string;
+  guildId: string;
+  start: number;
+  end: number;
+}
+
 export type ResizablePanelId = 'members' | 'voice-chat';
 
 /** Bounds and default width of each panel the user can widen; the chat always keeps the larger share. */
@@ -73,6 +83,10 @@ interface UiState {
   personMenu: PersonMenu | null;
   openPersonContextMenu: (menu: PersonMenu) => void;
   closePersonMenu: () => void;
+  /** Picked from the mention list; the composer applies it and clears it. */
+  pendingMention: PendingMention | null;
+  insertMention: (mention: PendingMention) => void;
+  consumeMention: () => void;
   memberListOpen: boolean;
   /** Widths chosen by dragging the panels' inner edges, kept only for this session. */
   panelWidths: Record<ResizablePanelId, number>;
@@ -97,6 +111,9 @@ export const useUiStore = create<UiState>((set) => ({
   personMenu: null,
   openPersonContextMenu: (personMenu) => set({ personMenu }),
   closePersonMenu: () => set({ personMenu: null }),
+  pendingMention: null,
+  insertMention: (pendingMention) => set({ pendingMention }),
+  consumeMention: () => set({ pendingMention: null }),
   memberListOpen: true,
   panelWidths: { members: PANEL_WIDTH.members.initial, 'voice-chat': PANEL_WIDTH['voice-chat'].initial },
   setPanelWidth: (id, width) => set((state) => ({ panelWidths: { ...state.panelWidths, [id]: clampPanelWidth(id, width) } })),

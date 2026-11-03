@@ -150,6 +150,18 @@
     padding: 0 2px;
     font-weight: 500;
   }
+
+  /* a resolved mention: the avatar or channel icon takes the place of the @ / # */
+  .mention-chip {
+    background: var(--color-brand-soft);
+    color: var(--color-brand);
+    padding: 0 4px 0 2px;
+    font-weight: 500;
+  }
+
+  .mention-chip:hover {
+    background: color-mix(in srgb, var(--color-brand) 20%, transparent);
+  }
 }
 
 /* Small white slider inside call cards: only visible on hover, thumb never crowds the track. */

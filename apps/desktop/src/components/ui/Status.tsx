@@ -17,6 +17,14 @@ const STATUS_LABEL: Record<UserStatus, string> = {
 
 export { STATUS_LABEL };
 
+/** Short word used next to names in compact lists (mentions), where the full label is too wide. */
+export const STATUS_SHORT: Record<UserStatus, string> = {
+  online: 'Disponível',
+  idle: 'Ausente',
+  dnd: 'Ocupado',
+  offline: 'Offline',
+};
+
 /** Small coloured dot used inline (menus, legendas). */
 export function StatusDot({ status, className }: { status: UserStatus; className?: string }) {
   return (
