@@ -71,13 +71,13 @@ export function MentionChip({
       // the textarea's own text sits under this mirror, so the chip covers it and the token
       // stays laid out invisibly: everything keeps the metrics it was typed with
       return (
-        <span className="relative inline-block align-top">
+        <span className="relative inline-block max-w-full align-top">
           <span className="invisible whitespace-pre">{token}</span>
-          <span className="absolute left-0 top-0 inline-flex h-full max-w-full items-center gap-1 rounded-[3px] bg-brand-soft px-1 text-brand">
+          <span className="absolute inset-0 inline-flex max-w-full items-center gap-1 overflow-hidden whitespace-nowrap rounded-[3px] bg-brand-soft px-1 text-brand">
             <span className="relative inline-flex shrink-0">
               <Avatar name={user.displayName} src={user.avatarUrl} color={user.accentColor} size="xs" className="size-4 text-[8px]" />
             </span>
-            <span className="min-w-0 truncate">{name}</span>
+            <span className="truncate">{name}</span>
           </span>
         </span>
       );
@@ -94,11 +94,11 @@ export function MentionChip({
   if (channel) {
     if (mirror) {
       return (
-        <span className="relative inline-block align-top">
+        <span className="relative inline-block max-w-full align-top">
           <span className="invisible whitespace-pre">{token}</span>
-          <span className="absolute left-0 top-0 inline-flex h-full max-w-full items-center gap-0.5 rounded-[3px] bg-brand-soft px-1 text-brand">
+          <span className="absolute inset-0 inline-flex max-w-full items-center gap-0.5 overflow-hidden whitespace-nowrap rounded-[3px] bg-brand-soft px-1 text-brand">
             <ChannelIcon voice={channel.channel} size={13} />
-            <span className="min-w-0 truncate">{name}</span>
+            <span className="truncate">{name}</span>
           </span>
         </span>
       );
