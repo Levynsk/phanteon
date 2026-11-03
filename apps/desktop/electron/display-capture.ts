@@ -50,7 +50,7 @@ export function registerDisplayCapture(
         callback(null);
         return;
       }
-      const audioSupport = process.platform === 'linux' ? await audioCaptureSupport() : { supported: false, reason: 'Captura de áudio está disponível apenas no Linux.' };
+      const audioSupport = await audioCaptureSupport();
       const audioApps = audioSupport.supported ? await listAudioCaptureApps() : [];
       const chosen = await pick(sources, suggestedQuality, audioSupport, audioApps);
       if (!chosen) {
@@ -72,7 +72,7 @@ export function registerDisplayCapture(
 export interface PickedShare {
   source: Electron.DesktopCapturerSource;
   quality: ShareQuality;
-  audio: { mode: CaptureMode; app?: CaptureApp };
+  audio: { mode: CaptureMode; app?: CaptureApp } | null;
 }
 
 /** Resolves to the chosen source and quality, or null when the user cancels. */
@@ -177,12 +177,12 @@ function showSourcePicker(
   const appLabel = document.getElementById('appLabel');
   const audioStatus = document.getElementById('audioStatus');
   const finish = () => {
-    if (selected === null || !audioSupport.supported || (audioMode.value === 'app' && !audioApp.value)) return;
+    if (selected === null || (audioSupport.supported && audioMode.value === 'app' && !audioApp.value)) return;
     window.displayPicker.choose({
       id: selected,
       height: Number(heightSelect.value),
       frameRate: Number(fpsSelect.value),
-      audioMode: audioMode.value,
+      audioMode: audioSupport.supported ? audioMode.value : null,
       audioApp: audioApp.value,
     });
   };
@@ -282,14 +282,15 @@ function showSourcePicker(
       }
       const source = sources.find((item) => item.id === id);
       const app = audioApps.find((item) => item.id === audioApp);
-      if (!source || !audioSupport.supported || (audioMode !== 'app' && audioMode !== 'desktop') || (audioMode === 'app' && !app)) {
+      const validAudio = audioMode === null || (audioSupport.supported && (audioMode === 'desktop' || (audioMode === 'app' && !!app)));
+      if (!source || !validAudio) {
         close(null);
         return;
       }
       close({
         source,
         quality: { height: Number(height) || DEFAULT_QUALITY.height, frameRate: Number(frameRate) || DEFAULT_QUALITY.frameRate },
-        audio: { mode: audioMode, ...(audioMode === 'app' && app ? { app } : {}) },
+        audio: audioMode ? { mode: audioMode, ...(audioMode === 'app' && app ? { app } : {}) } : null,
       });
     };
     const close = (picked: PickedShare | null) => {

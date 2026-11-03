@@ -10,7 +10,7 @@
     "build": "bun run build:renderer && bun run build:electron",
     "build:renderer": "vite build",
     "build:electron": "bun run build:audio-helper && bun build electron/main.ts electron/preload.ts electron/display-picker-preload.ts --outdir dist-electron --target node --external electron --format esm",
-    "build:audio-helper": "mkdir -p dist-electron/audio-capture && cc -O2 -Wall -Wextra -Werror electron/audio-capture/pulse-capture.c -o dist-electron/audio-capture/pulse-capture $(pkg-config --cflags --libs libpulse) && chmod 755 dist-electron/audio-capture/pulse-capture",
+    "build:audio-helper": "node -e \"const { spawnSync } = require('node:child_process'); const fs = require('node:fs'); fs.mkdirSync('dist-electron/audio-capture', { recursive: true }); const win = process.platform === 'win32'; const command = win ? 'cl.exe' : '/bin/sh'; const args = win ? ['/nologo', '/O2', '/W4', '/WX', 'electron/audio-capture/wasapi-capture.cpp', '/Fe:dist-electron/audio-capture/wasapi-capture.exe', '/link', 'ole32.lib', 'uuid.lib'] : ['-c', 'cc -O2 -Wall -Wextra -Werror electron/audio-capture/pulse-capture.c -o dist-electron/audio-capture/pulse-capture $(pkg-config --cflags --libs libpulse) && chmod 755 dist-electron/audio-capture/pulse-capture']; const result = spawnSync(command, args, { stdio: 'inherit', shell: win, env: process.env }); process.exit(result.status ?? 1);\"",
     "appimage": "bun run build && electron-builder --linux AppImage",
     "start": "electron dist-electron/main.js",
     "test": "bun test test",

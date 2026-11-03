@@ -20,7 +20,7 @@ export interface DesktopApi {
   listAudioCaptureApps: () => Promise<CaptureApp[]>;
   startAudioCapture: (mode: CaptureMode, app?: CaptureApp) => Promise<void>;
   stopAudioCapture: () => Promise<void>;
-  onAudioCapturePort: (listener: (port: MessagePort) => void) => () => void;
+  onAudioCapturePort: () => () => void;
   onAudioCaptureError: (listener: (message: string) => void) => () => void;
   window: {
     minimize: () => void;

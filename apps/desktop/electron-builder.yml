@@ -15,14 +15,18 @@ files:
   - dist-electron/**
   - package.json
   - '!**/node_modules/**'
-extraResources:
-  - from: dist-electron/audio-capture/pulse-capture
-    to: audio-capture/pulse-capture
-
 linux:
+  extraResources:
+    - from: dist-electron/audio-capture/pulse-capture
+      to: audio-capture/pulse-capture
   target:
     - AppImage
   category: Network;InstantMessaging
   synopsis: Phanteon desktop client
   mimeTypes:
     - x-scheme-handler/phanteon
+
+win:
+  extraResources:
+    - from: dist-electron/audio-capture/wasapi-capture.exe
+      to: audio-capture/wasapi-capture.exe

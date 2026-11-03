@@ -73,6 +73,8 @@ interface Peer {
   screenAudioMid: string | null;
   /** A listener is already waiting for the mid to be assigned. */
   watchMid?: boolean;
+  /** Negotiation requests are serialized per connection. */
+  negotiation?: Promise<void>;
 }
 
 /** HTMLAudioElement.volume only accepts 0..1, so boosted voices are clamped there. */
@@ -93,6 +95,7 @@ export class VoiceRtc {
   private screenStream: MediaStream | null = null;
   private screenHasAudio = false;
   private readonly remoteScreen = new Map<string, boolean>();
+  private readonly pendingRemoteScreen = new Map<string, Extract<RtcSignalData, { kind: 'screen' }>>();
   /** Remote screen-audio tracks kept out of the voice player. */
   private readonly screenAudioTracks = new Map<string, MediaStreamTrack>();
   /** Raw capture; `localStream` is what the peers actually receive (after the input gain). */
@@ -193,16 +196,24 @@ export class VoiceRtc {
     // stopping from the OS picker ends the share for everyone
     video.onended = () => this.stopScreenShare();
 
-    for (const [userId, peer] of this.peers) {
-      for (const track of stream.getTracks()) {
-        peer.connection.addTrack(track.kind === 'audio' ? markScreenAudio(track) : track, stream);
+    const announced: string[] = [];
+    try {
+      for (const [userId, peer] of this.peers) {
+        for (const track of stream.getTracks()) {
+          peer.connection.addTrack(track.kind === 'audio' ? markScreenAudio(track) : track, stream);
+        }
+        this.options.send(userId, { kind: 'screen', active: true, audio: this.screenHasAudio });
+        announced.push(userId);
+        await this.renegotiate(userId, peer);
+        this.announceScreenAudio(userId, peer);
+        this.watchScreenAudioMid(userId, peer);
       }
-      this.options.send(userId, { kind: 'screen', active: true, audio: this.screenHasAudio });
-      await this.renegotiate(userId, peer);
-      this.announceScreenAudio(userId, peer);
-      this.watchScreenAudioMid(userId, peer);
+      this.options.onLocalScreen?.(true, { video, audio: stream.getAudioTracks()[0] ?? null });
+    } catch (error) {
+      for (const userId of announced) this.options.send(userId, { kind: 'screen', active: false });
+      this.releaseScreenTracks(false);
+      throw error;
     }
-    this.options.onLocalScreen?.(true, { video, audio: stream.getAudioTracks()[0] ?? null });
   }
 
   /**
@@ -260,7 +271,7 @@ export class VoiceRtc {
           void peer.connection.removeTrack(sender);
         }
       }
-      void this.renegotiate(userId, peer);
+      void this.renegotiate(userId, peer).catch(() => undefined);
     }
     if (notify) this.options.onLocalScreen?.(false, { video: null, audio: null });
   }
@@ -280,28 +291,35 @@ export class VoiceRtc {
    * flight: the offer waits for the connection to settle and then goes out, which
    * is what makes the screen tracks actually reach the peers.
    */
-  private async renegotiate(userId: string, peer: Peer): Promise<void> {
-    await this.whenStable(peer.connection);
-    if (this.closed || peer.connection.signalingState !== 'stable') return;
-    await this.makeOffer(userId, peer);
+  private renegotiate(userId: string, peer: Peer): Promise<void> {
+    const run = async () => {
+      await this.whenStable(peer.connection);
+      if (this.closed) throw new Error('A chamada foi encerrada antes de publicar a transmissão.');
+      await this.makeOffer(userId, peer);
+    };
+    const pending = (peer.negotiation ?? Promise.resolve()).catch(() => undefined).then(run);
+    peer.negotiation = pending;
+    return pending;
   }
 
-  /** Resolves once the connection leaves `have-local-offer`/`have-remote-offer`. */
+  /** Resolves once the connection is stable; closed or stalled connections fail explicitly. */
   private whenStable(connection: RTCPeerConnection): Promise<void> {
-    if (connection.signalingState === 'stable' || connection.signalingState === 'closed') return Promise.resolve();
-    return new Promise((resolve) => {
-      const check = () => {
-        if (connection.signalingState === 'stable' || connection.signalingState === 'closed') {
-          connection.removeEventListener('signalingstatechange', check);
-          resolve();
-        }
-      };
-      connection.addEventListener('signalingstatechange', check);
-      // a peer that never answers must not hang the share forever
-      setTimeout(() => {
+    if (connection.signalingState === 'stable') return Promise.resolve();
+    if (connection.signalingState === 'closed') return Promise.reject(new Error('A conexão com o participante foi encerrada.'));
+    return new Promise((resolve, reject) => {
+      const finish = (error?: Error) => {
+        clearTimeout(timeout);
         connection.removeEventListener('signalingstatechange', check);
-        resolve();
-      }, NEGOTIATION_TIMEOUT_MS);
+        if (error) reject(error);
+        else resolve();
+      };
+      const check = () => {
+        if (connection.signalingState === 'stable') finish();
+        else if (connection.signalingState === 'closed') finish(new Error('A conexão com o participante foi encerrada.'));
+      };
+      const timeout = setTimeout(() => finish(new Error('A conexão com o participante não estabilizou para iniciar a transmissão.')), NEGOTIATION_TIMEOUT_MS);
+      connection.addEventListener('signalingstatechange', check);
+      check();
     });
   }
 
@@ -391,7 +409,11 @@ export class VoiceRtc {
     if (this.closed || from === this.options.selfId) return;
     if (data.kind === 'screen') {
       const peer = this.peers.get(from);
-      if (!peer) return;
+      if (!peer) {
+        this.pendingRemoteScreen.set(from, data);
+        return;
+      }
+      this.pendingRemoteScreen.delete(from);
       this.remoteScreen.set(from, data.active);
       if (typeof data.audioMid === 'string') peer.screenAudioMid = data.audioMid;
       this.options.onRemoteScreen?.(from, data.active);
@@ -506,6 +528,8 @@ export class VoiceRtc {
     peer.connection.ontrack = null;
     peer.connection.close();
     this.peers.delete(userId);
+    this.pendingRemoteScreen.delete(userId);
+    this.remoteScreen.delete(userId);
     this.players.get(userId)?.remove();
     this.players.delete(userId);
     this.setRemoteSpeaking(userId, false);
@@ -519,6 +543,7 @@ export class VoiceRtc {
     for (const track of this.screenStream?.getTracks() ?? []) track.stop();
     this.screenStream = null;
     this.remoteScreen.clear();
+    this.pendingRemoteScreen.clear();
     for (const userId of [...this.peers.keys()]) this.disconnectPeer(userId);
     for (const stream of [this.localStream, this.rawStream]) {
       for (const track of stream?.getTracks() ?? []) track.stop();
@@ -565,6 +590,15 @@ export class VoiceRtc {
       }, { once: true });
       this.playRemote(userId, remote);
     };
+    const pendingScreen = this.pendingRemoteScreen.get(userId);
+    if (pendingScreen) {
+      this.pendingRemoteScreen.delete(userId);
+      this.remoteScreen.set(userId, pendingScreen.active);
+      this.options.onRemoteScreen?.(userId, pendingScreen.active);
+      if (typeof pendingScreen.audioMid === 'string') peer.screenAudioMid = pendingScreen.audioMid;
+      if (pendingScreen.active) this.promoteScreenAudio(userId, peer);
+      else this.clearRemoteVideo(userId);
+    }
     return peer;
   }
 

@@ -45,7 +45,7 @@ const fakeMedia = {
 
 const replacements: string[] = [];
 
-class FakePeerConnection {
+class FakePeerConnection extends EventTarget {
   readonly senders: { track: FakeTrack | null; replaceTrack: (track: FakeTrack) => Promise<void> }[] = [];
   onicecandidate: unknown = null;
   ontrack: unknown = null;
@@ -73,6 +73,9 @@ class FakePeerConnection {
   createOffer() {
     this.offers += 1;
     return Promise.resolve({ sdp: 'offer-sdp' });
+  }
+  createAnswer() {
+    return Promise.resolve({ sdp: 'answer-sdp' });
   }
   setLocalDescription(desc: { type: string }) {
     if (desc.type === 'rollback') this.rollbacks += 1;
@@ -304,6 +307,61 @@ describe('VoiceRtc screen sharing', () => {
     expect(sent.filter((entry) => entry.kind === 'screen')).toEqual([{ to: 'bob', kind: 'screen' }]);
     expect(peers.get('bob')!.connection.added).toContain(video as unknown as FakeTrack);
     expect(rtc.sharingScreen()).toBe(true);
+    rtc.stop();
+  });
+
+  test('keeps a screen announcement that arrives before its offer', async () => {
+    const { VoiceRtc } = await import('../src/lib/voice-rtc');
+    const screens: Record<string, boolean> = {};
+    const rtc = new VoiceRtc({
+      channelId: 'voz',
+      selfId: 'alice',
+      send: () => undefined,
+      onLocalSpeaking: () => undefined,
+      onRemoteSpeaking: () => undefined,
+      onRemoteScreen: (userId, active) => { screens[userId] = active; },
+    });
+    await rtc.start();
+
+    await rtc.applySignal('bob', { kind: 'screen', active: true });
+    expect(screens.bob).toBeUndefined();
+    await rtc.applySignal('bob', { kind: 'offer', sdp: 'offer-sdp' });
+
+    expect(screens.bob).toBe(true);
+    rtc.stop();
+  });
+
+  test('waits for a busy connection to stabilize before offering the screen track', async () => {
+    const { rtc, peers } = await signal();
+    const connection = peers.get('bob')!.connection;
+    const before = connection.offers;
+    connection.signalingState = 'have-local-offer';
+    const video = Object.assign(new FakeTrack('screen-pending'), { kind: 'video' });
+    const stream = { getVideoTracks: () => [video], getAudioTracks: () => [], getTracks: () => [video] } as unknown as MediaStream;
+
+    const sharing = rtc.shareScreen(stream);
+    await Bun.sleep(0);
+    expect(connection.offers).toBe(before);
+    connection.signalingState = 'stable';
+    connection.dispatchEvent(new Event('signalingstatechange'));
+    await sharing;
+
+    expect(connection.offers).toBe(before + 1);
+    expect(rtc.sharingScreen()).toBe(true);
+    rtc.stop();
+  });
+
+  test('fails and stops the capture when a connection never stabilizes', async () => {
+    const { rtc, peers } = await signal();
+    const connection = peers.get('bob')!.connection;
+    connection.signalingState = 'have-local-offer';
+    const video = Object.assign(new FakeTrack('screen-timeout'), { kind: 'video' });
+    const stream = { getVideoTracks: () => [video], getAudioTracks: () => [], getTracks: () => [video] } as unknown as MediaStream;
+
+    await expect(rtc.shareScreen(stream)).rejects.toThrow('não estabilizou');
+
+    expect(video.stopped).toBe(true);
+    expect(rtc.sharingScreen()).toBe(false);
     rtc.stop();
   });
 

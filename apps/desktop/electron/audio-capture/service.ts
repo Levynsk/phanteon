@@ -15,15 +15,26 @@ function appendStderr(current: string, chunk: string): string {
   return (current + chunk).slice(-MAX_STDERR_BYTES);
 }
 
-function helperPath(): string {
-  return app.isPackaged
-    ? join(process.resourcesPath, 'audio-capture', 'pulse-capture')
-    : join(import.meta.dirname, 'audio-capture', 'pulse-capture');
+export type AudioCapturePlatform = 'linux' | 'win32';
+
+export function helperName(platform: AudioCapturePlatform): string {
+  return platform === 'win32' ? 'wasapi-capture.exe' : 'pulse-capture';
 }
 
-function runList(): Promise<PulseStream[]> {
+export function resolveHelperPath(platform: AudioCapturePlatform, packaged: boolean, resourcesPath: string, moduleDir: string): string {
+  const name = helperName(platform);
+  return packaged
+    ? join(resourcesPath, 'audio-capture', name)
+    : join(moduleDir, 'audio-capture', name);
+}
+
+function helperPath(): string {
+  return resolveHelperPath(process.platform as AudioCapturePlatform, app.isPackaged, process.resourcesPath, import.meta.dirname);
+}
+
+function runHelper<T = PulseStream[]>(args: string[]): Promise<T> {
   return new Promise((resolve, reject) => {
-    const child = spawn(helperPath(), ['list'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(helperPath(), args, { stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
     child.stdout.setEncoding('utf8').on('data', (chunk: string) => {
@@ -33,20 +44,25 @@ function runList(): Promise<PulseStream[]> {
     child.stderr.setEncoding('utf8').on('data', (chunk: string) => { stderr = appendStderr(stderr, chunk); });
     child.once('error', reject);
     child.once('close', (code) => {
-      if (code !== 0) return reject(new Error(stderr.trim() || 'PipeWire-Pulse indisponível.'));
-      try { resolve(JSON.parse(stdout) as PulseStream[]); } catch { reject(new Error('Resposta inválida do helper de áudio.')); }
+      if (code !== 0) return reject(new Error(stderr.trim() || (process.platform === 'win32' ? 'WASAPI indisponível.' : 'PipeWire-Pulse indisponível.')));
+      try { resolve(JSON.parse(stdout) as T); } catch { reject(new Error('Resposta inválida do helper de áudio.')); }
     });
   });
 }
 
 export async function audioCaptureSupport(): Promise<{ supported: boolean; reason?: string }> {
-  if (process.platform !== 'linux') return { supported: false, reason: 'Captura de áudio está disponível apenas no Linux.' };
-  try { await runList(); return { supported: true }; }
+  if (process.platform === 'win32') {
+    try { await runHelper<Record<string, never>>(['probe']); return { supported: true }; }
+    catch (error) { return { supported: false, reason: error instanceof Error ? error.message : 'WASAPI indisponível.' }; }
+  }
+  if (process.platform !== 'linux') return { supported: false, reason: 'Captura de áudio indisponível nesta plataforma.' };
+  try { await runHelper<PulseStream[]>(['list']); return { supported: true }; }
   catch (error) { return { supported: false, reason: error instanceof Error ? error.message : 'PipeWire-Pulse indisponível.' }; }
 }
 
 export async function listAudioCaptureApps(): Promise<CaptureApp[]> {
-  const list = await runList();
+  if (process.platform === 'win32') return [];
+  const list = await runHelper<PulseStream[]>(['list']);
   const grouped = new Map<string, CaptureApp>();
   for (const stream of list) {
     if (stream.pid <= 0 || !stream.name || isPhanteon(stream)) continue;
@@ -67,9 +83,7 @@ function ensureOwner(event: Electron.IpcMainInvokeEvent): void {
 export function registerAudioCapture(): void {
   ipcMain.handle(IPC.audioCaptureSupport, async (event) => {
     ensureOwner(event);
-    if (process.platform !== 'linux') return { supported: false, reason: 'Captura de áudio por aplicativo só é suportada no Linux.' };
-    try { await runList(); return { supported: true }; }
-    catch (error) { return { supported: false, reason: error instanceof Error ? error.message : 'PipeWire-Pulse indisponível.' }; }
+    return audioCaptureSupport();
   });
   ipcMain.handle(IPC.listAudioCaptureApps, async (event) => {
     ensureOwner(event);
@@ -83,15 +97,16 @@ export function registerAudioCapture(): void {
     await previous;
     try {
     ensureOwner(event);
-    if (process.platform !== 'linux') throw new Error('Captura de áudio não suportada nesta plataforma.');
-    if (active) await stopActive();
+    if (process.platform !== 'linux' && process.platform !== 'win32') throw new Error('Captura de áudio não suportada nesta plataforma.');
     if (mode !== 'app' && mode !== 'desktop') throw new Error('Modo de captura inválido.');
+    if (process.platform === 'win32' && mode !== 'desktop') throw new Error('Captura por aplicativo só é suportada no Linux.');
+    if (active) await stopActive();
     let args: string[];
     if (mode === 'app') {
       if (!selected || !Number.isSafeInteger(selected.pid) || selected.pid <= 0 || !selected.name || isPhanteon(selected)) {
         throw new Error('Selecione um aplicativo de áudio válido; Phanteon não pode ser capturado.');
       }
-      const fresh = await runList();
+      const fresh = await runHelper<PulseStream[]>(['list']);
       const exists = fresh.some((stream) => stream.pid === selected.pid && stream.name === selected.name && !isPhanteon(stream));
       if (!exists) throw new Error('O aplicativo selecionado não tem um stream de áudio ativo.');
       args = ['capture-app', String(selected.pid), selected.name];

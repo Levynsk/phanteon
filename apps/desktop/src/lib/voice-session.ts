@@ -168,34 +168,34 @@ export async function startScreenShare(): Promise<{ hasAudio: boolean; label: st
   const bridge = window.desktop;
   if (!bridge) throw new Error('A ponte segura de áudio da aplicação não está disponível.');
   const support = await bridge.audioCaptureSupport();
-  if (!support.supported) throw new Error(support.reason ?? 'Captura de áudio não suportada neste sistema.');
   await bridge.setShareQuality(saved);
   let stream: MediaStream | null = null;
-  removeShareError = bridge.onAudioCaptureError((message) => {
-    stopAudioCapture();
-    current?.rtc.stopScreenShare();
-    shareStream = null;
-    console.error(message);
-  });
+  if (support.supported) {
+    removeShareError = bridge.onAudioCaptureError((message) => {
+      stopAudioCapture();
+      current?.rtc.stopScreenShare();
+      shareStream = null;
+      console.error(message);
+    });
+  }
   try {
     stream = await navigator.mediaDevices.getDisplayMedia({ video: screenVideoConstraints(saved), audio: false });
     const picked = await bridge.consumeShareQuality();
     const audio = await bridge.consumeShareAudio();
-    if (!audio) throw new Error('Seleção de áudio da transmissão não encontrada.');
     const video = stream.getVideoTracks()[0];
     if (!video) throw new Error('A fonte selecionada não forneceu vídeo.');
     if (picked) {
       await video.applyConstraints(screenVideoConstraints(picked)).catch(() => undefined);
       useAudioStore.getState().setPrefs({ screenQuality: picked });
     }
-    const audioTrack = await startAudioCapture(audio.mode, audio.app, bridge);
-    const combined = new MediaStream([video, audioTrack]);
+    const audioTrack = audio && support.supported ? await startAudioCapture(audio.mode, audio.app, bridge) : null;
+    const combined = new MediaStream([video, ...(audioTrack ? [audioTrack] : [])]);
     shareStream = combined;
     const cleanupShare = () => { stopAudioCapture(); removeShareError(); shareStream = null; };
     video.addEventListener('ended', cleanupShare, { once: true });
-    audioTrack.addEventListener('ended', cleanupShare, { once: true });
+    audioTrack?.addEventListener('ended', cleanupShare, { once: true });
     await current.rtc.shareScreen(combined);
-    return { hasAudio: true, label: video.label, quality: video.getSettings() };
+    return { hasAudio: !!audioTrack, label: video.label, quality: video.getSettings() };
   } catch (error) {
     for (const track of stream?.getTracks() ?? []) track.stop();
     await bridge.stopAudioCapture().catch(() => undefined);
@@ -210,26 +210,42 @@ async function startAudioCapture(mode: CaptureMode, app: CaptureApp | undefined,
   let resolvePort!: (port: MessagePort) => void;
   let rejectPort!: (error: Error) => void;
   const portReady = new Promise<MessagePort>((resolve, reject) => { resolvePort = resolve; rejectPort = reject; });
-  const unsubscribe = bridge.onAudioCapturePort((port) => { unsubscribe(); resolvePort(port); });
-  const unsubscribeError = bridge.onAudioCaptureError((message) => { unsubscribe(); unsubscribeError(); rejectPort(new Error(message)); });
+  const onMessage = (event: MessageEvent) => {
+    if (event.source !== window || event.data?.type !== 'phanteon:audio-capture-port') return;
+    const port = event.ports[0];
+    if (!port) {
+      rejectPort(new Error('A porta de áudio da transmissão não foi recebida.'));
+      return;
+    }
+    window.removeEventListener('message', onMessage);
+    resolvePort(port);
+  };
+  window.addEventListener('message', onMessage);
+  const unsubscribePort = bridge.onAudioCapturePort();
+  const unsubscribeError = bridge.onAudioCaptureError((message) => rejectPort(new Error(message)));
+  let port: MessagePort | undefined;
   try {
-    await bridge.startAudioCapture(mode, app);
-    const port = await portReady;
+    await Promise.all([bridge.startAudioCapture(mode, app), portReady.then((received) => { port = received; })]);
     unsubscribeError();
     const context = new AudioContext({ sampleRate: 48000 });
     await context.audioWorklet.addModule(new URL('audio-capture-worklet.js', document.baseURI));
     const destination = context.createMediaStreamDestination();
     const node = new AudioWorkletNode(context, 'phanteon-pulse-pcm', { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2] });
-    node.port.postMessage(port, [port]);
+    node.port.postMessage(port, [port!]);
     node.connect(destination);
+    const capturePort = port!;
     audioCapture = {
-      context, node, destination, port,
-      dispose: () => { port.close(); node.disconnect(); for (const track of destination.stream.getTracks()) track.stop(); void context.close(); },
+      context, node, destination, port: capturePort,
+      dispose: () => { capturePort.close(); node.disconnect(); for (const track of destination.stream.getTracks()) track.stop(); void context.close(); },
     };
     return destination.stream.getAudioTracks()[0]!;
   } catch (error) {
-    unsubscribe(); unsubscribeError();
+    port?.close();
     throw error;
+  } finally {
+    window.removeEventListener('message', onMessage);
+    unsubscribePort();
+    unsubscribeError();
   }
 }
 

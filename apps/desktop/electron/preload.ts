@@ -17,10 +17,10 @@ const api: DesktopApi = {
   listAudioCaptureApps: () => ipcRenderer.invoke(IPC.listAudioCaptureApps),
   startAudioCapture: (mode, app) => ipcRenderer.invoke(IPC.startAudioCapture, mode, app),
   stopAudioCapture: () => ipcRenderer.invoke(IPC.stopAudioCapture),
-  onAudioCapturePort: (listener) => {
+  onAudioCapturePort: () => {
     const handler = (event: Electron.IpcRendererEvent) => {
       const port = (event as Electron.IpcRendererEvent & { ports?: MessagePort[] }).ports?.[0];
-      if (port) listener(port);
+      if (port) window.postMessage({ type: 'phanteon:audio-capture-port' }, '*', [port]);
     };
     ipcRenderer.on(IPC.audioCapturePort, handler);
     return () => ipcRenderer.removeListener(IPC.audioCapturePort, handler);
