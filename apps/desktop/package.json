@@ -5,6 +5,7 @@
   "type": "module",
   "main": "dist-electron/main.js",
   "description": "Phanteon desktop client",
+  "author": "Panteao Studios",
   "scripts": {
     "dev": "bun run scripts/dev.ts",
     "build": "bun run build:renderer && bun run build:electron",

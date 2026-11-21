@@ -8,9 +8,16 @@ import { persist } from 'zustand/middleware';
  */
 export const THEMES = [
   {
+    id: 'discord',
+    name: 'Discord',
+    description: 'Grafite do Discord em preto OLED, com destaque carmim. O padrão do app.',
+    palette: { app: '#000000', sidebar: '#0d0d0f', chat: '#1a1b1e', elevated: '#232428', divider: '#26272b', text: '#dbdee1', brand: '#e11d48' },
+    dark: true,
+  },
+  {
     id: 'oled',
     name: 'OLED',
-    description: 'Preto puro, ideal para telas OLED. O padrão do app.',
+    description: 'Preto puro, ideal para telas OLED.',
     palette: { app: '#000000', sidebar: '#000000', chat: '#000000', elevated: '#141416', divider: '#1c1c1f', text: '#e4e4e7', brand: '#fbbf24' },
     dark: true,
   },
@@ -55,11 +62,11 @@ export const THEMES = [
  * Ids the inline script in `index.html` accepts. It runs before the bundle, so
  * it cannot import this array; keep the two in step when adding a theme.
  */
-export const PREPAINT_THEME_IDS = ['oled', 'dark', 'light', 'gruvbox', 'bloody', 'forest'] as const;
+export const PREPAINT_THEME_IDS = ['discord', 'oled', 'dark', 'light', 'gruvbox', 'bloody', 'forest'] as const;
 
 export type ThemeId = (typeof THEMES)[number]['id'];
 
-export const DEFAULT_THEME: ThemeId = 'oled';
+export const DEFAULT_THEME: ThemeId = 'discord';
 
 function isThemeId(value: unknown): value is ThemeId {
   return THEMES.some((theme) => theme.id === value);
@@ -88,6 +95,13 @@ export const useThemeStore = create<ThemeState>()(
     }),
     {
       name: 'phanteon-theme',
+      // v2: the Discord OLED redesign becomes the default for installs that still
+      // carry the old palette; from here on the user's pick is kept untouched
+      version: 2,
+      migrate: (persisted, version) => {
+        if (version < 2) return { theme: DEFAULT_THEME };
+        return persisted as ThemeState;
+      },
       // keeps the first paint on the saved theme instead of flashing the default
       onRehydrateStorage: () => (state) => {
         apply(state?.theme && isThemeId(state.theme) ? state.theme : DEFAULT_THEME);

@@ -42,15 +42,19 @@ type VoiceEvent = Extract<
 
 let playback: ReturnType<typeof spyOn>;
 let deafened: ReturnType<typeof spyOn>;
+let muted: ReturnType<typeof spyOn>;
 let reconcile: ReturnType<typeof spyOn>;
 let disconnect: ReturnType<typeof spyOn>;
+let stopMesh: ReturnType<typeof spyOn>;
 
 beforeEach(() => {
   // no RTC session runs in this test, so only the store's calls matter
   playback = spyOn(session, 'setPlaybackMuted').mockImplementation(() => {});
   deafened = spyOn(session, 'setSelfDeafened').mockImplementation(() => {});
+  muted = spyOn(session, 'setSelfMuted').mockImplementation(() => {});
   reconcile = spyOn(session, 'reconcileVoiceMesh').mockResolvedValue(undefined);
   disconnect = spyOn(session, 'disconnectVoicePeer').mockImplementation(() => {});
+  stopMesh = spyOn(session, 'stopVoiceMesh').mockImplementation(() => {});
   useChatStore.getState().reset();
   useChatStore.setState({ voiceStates: {}, myVoice: { guildId: 'guild-1', channelId: 'call-a' } });
 });
@@ -58,8 +62,10 @@ beforeEach(() => {
 afterEach(() => {
   playback.mockRestore();
   deafened.mockRestore();
+  muted.mockRestore();
   reconcile.mockRestore();
   disconnect.mockRestore();
+  stopMesh.mockRestore();
 });
 
 function lastReconciledPeers(): string[] | undefined {
@@ -96,11 +102,29 @@ describe('voice store event handling', () => {
   test('my own voice state applies global deafen without muting my user id as a peer', () => {
     handle({ type: 'voice:state', state: voiceState(ME, { selfDeaf: true, selfMute: true }) });
     expect(deafened.mock.calls.at(-1)?.[0]).toBe(true);
+    expect(muted.mock.calls.at(-1)?.[0]).toBe(true);
     expect(playback.mock.calls).toHaveLength(0);
 
     handle({ type: 'voice:state', state: voiceState(ME, { selfDeaf: false, selfMute: true }) });
     expect(deafened.mock.calls.at(-1)?.[0]).toBe(false);
+    expect(muted.mock.calls.at(-1)?.[0]).toBe(true);
     expect(playback.mock.calls).toHaveLength(0);
+  });
+
+  test('a server-deafened me keeps the microphone muted even if the server row says selfMute false', () => {
+    handle({ type: 'voice:state', state: voiceState(ME, { serverDeaf: true, selfMute: false }) });
+    expect(muted.mock.calls.at(-1)?.[0]).toBe(true);
+    expect(deafened.mock.calls.at(-1)?.[0]).toBe(true);
+  });
+
+  test('a moderator disconnecting me stops my mesh and stream instead of leaving it live', () => {
+    handle({ type: 'voice:state', state: voiceState(ME, { channelId: 'call-a' }) });
+    stopMesh.mockClear();
+
+    handle({ type: 'voice:leave', guildId: 'guild-1', channelId: 'call-a', userId: ME });
+
+    expect(stopMesh).toHaveBeenCalledTimes(1);
+    expect(useChatStore.getState().myVoice).toBeNull();
   });
 
   test('voice sync applies my deafen and continues applying each peer mute independently', () => {

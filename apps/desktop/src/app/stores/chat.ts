@@ -582,7 +582,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     else if (input.selfMute === false && (selfState?.selfDeaf || selfState?.serverDeaf)) return;
     const { state } = await api.voice.updateSelf(next);
     // the outgoing track and local playback follow the authoritative server state
-    setSelfMuted(state.selfMute || state.serverMute);
+    setSelfMuted(state.selfMute || state.serverMute || state.serverDeaf || state.selfDeaf);
     setSelfDeafened(state.selfDeaf || state.serverDeaf);
     set((s) => ({ voiceStates: { ...s.voiceStates, [`${state.guildId}:${state.user.id}`]: state } }));
   },
@@ -807,7 +807,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           );
           for (const state of event.states) {
             if (state.user.id === currentUserId) {
-              setSelfMuted(state.selfMute || state.serverMute);
+              setSelfMuted(state.selfMute || state.serverMute || state.serverDeaf || state.selfDeaf);
               setSelfDeafened(state.selfDeaf || state.serverDeaf);
             } else {
               setPlaybackMuted(state.user.id, state.serverMute || state.serverDeaf || state.selfDeaf);
@@ -843,7 +843,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           if (notifications.prefs.soundsForCalls) playCue('join-call', notifications.prefs.volume);
         }
         if (state.user.id === currentUserId) {
-          setSelfMuted(state.selfMute || state.serverMute);
+          setSelfMuted(state.selfMute || state.serverMute || state.serverDeaf || state.selfDeaf);
           setSelfDeafened(state.selfDeaf || state.serverDeaf);
         } else {
           // server mute/deafen outranks the peer's own flags: they cannot undo it themselves
@@ -868,6 +868,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
         if (leftActiveCall) {
           const notifications = useNotificationStore.getState();
           if (notifications.prefs.soundsForCalls) playCue('leave-call', notifications.prefs.volume);
+        }
+        // a moderator can disconnect me (or a kick removes my seat): the socket must not keep
+        // sending microphone and screen tracks to peers after the server dropped my call
+        if (event.userId === currentUserId && mine?.guildId === event.guildId && mine.channelId === event.channelId) {
+          stopVoiceMesh();
         }
         set((s) => {
           const voiceStates = { ...s.voiceStates };

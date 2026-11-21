@@ -94,9 +94,11 @@ export class VoiceRtc {
   /** Capture of the screen currently being shared, if any. */
   private screenStream: MediaStream | null = null;
   private screenHasAudio = false;
+  /** The sharer's own "mute stream audio" control; the mic mute never touches it. */
+  private screenAudioMuted = false;
   private readonly remoteScreen = new Map<string, boolean>();
   private readonly pendingRemoteScreen = new Map<string, Extract<RtcSignalData, { kind: 'screen' }>>();
-  /** Remote screen-audio tracks kept out of the voice player. */
+  /** Remote screen-audio tracks kept out of the voice player, keyed by sender. */
   private readonly screenAudioTracks = new Map<string, MediaStreamTrack>();
   /** Raw capture; `localStream` is what the peers actually receive (after the input gain). */
   private rawStream: MediaStream | null = null;
@@ -193,6 +195,8 @@ export class VoiceRtc {
     this.releaseScreenTracks(false);
     this.screenStream = stream;
     this.screenHasAudio = stream.getAudioTracks().length > 0;
+    // a stream muted before the share stays muted: the control is independent of the mic
+    for (const track of stream.getAudioTracks()) track.enabled = !this.screenAudioMuted;
     // stopping from the OS picker ends the share for everyone
     video.onended = () => this.stopScreenShare();
 
@@ -202,11 +206,9 @@ export class VoiceRtc {
         for (const track of stream.getTracks()) {
           peer.connection.addTrack(track.kind === 'audio' ? markScreenAudio(track) : track, stream);
         }
-        this.options.send(userId, { kind: 'screen', active: true, audio: this.screenHasAudio });
         announced.push(userId);
         await this.renegotiate(userId, peer);
-        this.announceScreenAudio(userId, peer);
-        this.watchScreenAudioMid(userId, peer);
+        this.publishScreen(userId, peer);
       }
       this.options.onLocalScreen?.(true, { video, audio: stream.getAudioTracks()[0] ?? null });
     } catch (error) {
@@ -214,6 +216,24 @@ export class VoiceRtc {
       this.releaseScreenTracks(false);
       throw error;
     }
+  }
+
+  /**
+   * Tells one peer that a share is live. Called for late joiners too, so a
+   * person who enters the call after the share started still receives it, and
+   * again after every negotiation so the screen-audio mid travels along.
+   */
+  private publishScreen(userId: string, peer: Peer): void {
+    if (!this.screenStream) return;
+    const mid = this.screenHasAudio ? this.screenAudioMidOf(peer) : null;
+    if (mid) peer.screenAudioMid = mid;
+    this.options.send(userId, {
+      kind: 'screen',
+      active: true,
+      audio: this.screenHasAudio,
+      ...(mid ? { audioMid: mid } : {}),
+    });
+    this.watchScreenAudioMid(userId, peer);
   }
 
   /**
@@ -324,6 +344,8 @@ export class VoiceRtc {
   }
 
   private clearRemoteVideo(userId: string): void {
+    this.remoteScreen.delete(userId);
+    this.screenAudioTracks.delete(userId);
     this.options.onRemoteScreenTrack?.(userId, null);
     this.options.onRemoteScreenAudioTrack?.(userId, null);
   }
@@ -402,7 +424,14 @@ export class VoiceRtc {
     if (this.closed || userId === this.options.selfId || this.peers.has(userId)) return;
     const peer = this.createPeer(userId);
     // deterministic roles: only the lower id offers, which avoids glare
-    if (this.isOfferer(userId)) await this.makeOffer(userId, peer);
+    if (this.isOfferer(userId)) {
+      await this.makeOffer(userId, peer);
+      // after the offer: the mid exists, so a live share can announce its audio
+      this.publishScreen(userId, peer);
+    } else {
+      // the remote will offer; announce now so a late joiner knows a share is live
+      this.publishScreen(userId, peer);
+    }
   }
 
   async applySignal(from: string, data: RtcSignalData): Promise<void> {
@@ -467,7 +496,7 @@ export class VoiceRtc {
     await connection.setLocalDescription(answer);
     this.options.send(from, { kind: 'answer', sdp: answer.sdp ?? '' });
     // answering a sharer's offer creates the receiving side of the screen audio
-    this.announceScreenAudio(from, peer);
+    if (this.screenStream) this.publishScreen(from, peer);
   }
 
   /** Candidates can arrive before the description; keep them until it does. */
@@ -494,6 +523,20 @@ export class VoiceRtc {
   /** Mutes the outgoing track: peers simply stop receiving audio. */
   setSelfMuted(muted: boolean): void {
     for (const track of this.localTracks()) track.enabled = !muted;
+  }
+
+  /**
+   * The stream-audio control of the sharer. Deliberately separate from the mic
+   * mute, like Discord's "share your sound": muting the microphone keeps the
+   * shared application audio alive.
+   */
+  setScreenAudioMuted(muted: boolean): void {
+    this.screenAudioMuted = muted;
+    for (const track of this.screenStream?.getAudioTracks() ?? []) track.enabled = !muted;
+  }
+
+  screenAudioIsMuted(): boolean {
+    return this.screenAudioMuted;
   }
 
   /** Applies the local deafen to every remote voice player. */
@@ -529,9 +572,13 @@ export class VoiceRtc {
     peer.connection.close();
     this.peers.delete(userId);
     this.pendingRemoteScreen.delete(userId);
-    this.remoteScreen.delete(userId);
+    const wasSharing = this.remoteScreen.get(userId) ?? false;
+    this.clearRemoteVideo(userId);
+    if (wasSharing) this.options.onRemoteScreen?.(userId, false);
     this.players.get(userId)?.remove();
     this.players.delete(userId);
+    this.remoteAnalysers.delete(userId);
+    this.forcedMute.delete(userId);
     this.setRemoteSpeaking(userId, false);
   }
 
@@ -540,10 +587,14 @@ export class VoiceRtc {
     this.unsubscribeAudio();
     if (this.meter) clearInterval(this.meter);
     this.meter = null;
+    const wasSharing = !!this.screenStream;
     for (const track of this.screenStream?.getTracks() ?? []) track.stop();
     this.screenStream = null;
+    this.screenHasAudio = false;
+    if (wasSharing) this.options.onLocalScreen?.(false, { video: null, audio: null });
     this.remoteScreen.clear();
     this.pendingRemoteScreen.clear();
+    this.screenAudioTracks.clear();
     for (const userId of [...this.peers.keys()]) this.disconnectPeer(userId);
     for (const stream of [this.localStream, this.rawStream]) {
       for (const track of stream?.getTracks() ?? []) track.stop();
@@ -563,6 +614,13 @@ export class VoiceRtc {
 
     const stream = this.localStream;
     if (stream) for (const track of stream.getAudioTracks()) connection.addTrack(track, stream);
+    // someone joining mid-share gets the live tracks as part of the first negotiation
+    const screen = this.screenStream;
+    if (screen) {
+      for (const track of screen.getTracks()) {
+        connection.addTrack(track.kind === 'audio' ? markScreenAudio(track) : track, screen);
+      }
+    }
 
     connection.onicecandidate = (event) => {
       if (event.candidate) this.options.send(userId, { kind: 'candidate', candidate: event.candidate.toJSON() });
@@ -576,7 +634,7 @@ export class VoiceRtc {
       if (event.track.kind === 'audio' && this.isScreenAudio(peer, event)) {
         // keep it out of the voice player regardless of when the mid arrives
         event.track.enabled = true;
-        this.screenAudioTracks.set(event.track.id, event.track);
+        this.screenAudioTracks.set(userId, event.track);
         this.options.onRemoteScreenAudioTrack?.(userId, event.track);
         return;
       }
@@ -611,8 +669,8 @@ export class VoiceRtc {
     if (!mid) return;
     const transceiver = peer.connection.getTransceivers?.().find((entry) => entry.mid === mid);
     const track = transceiver?.receiver.track;
-    if (!track || track.kind !== 'audio' || this.screenAudioTracks.has(track.id)) return;
-    this.screenAudioTracks.set(track.id, track);
+    if (!track || track.kind !== 'audio' || this.screenAudioTracks.get(userId)?.id === track.id) return;
+    this.screenAudioTracks.set(userId, track);
     // the stream holding it also carries the microphone: drop only that track
     const voice = peer.stream?.getAudioTracks().filter((entry) => entry !== track) ?? [];
     if (peer.stream) {

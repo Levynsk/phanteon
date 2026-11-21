@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="pt-BR" data-theme="oled">
+<html lang="pt-BR" data-theme="discord">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -13,7 +13,7 @@
       try {
         var saved = JSON.parse(localStorage.getItem('phanteon-theme') || '{}');
         var theme = saved && saved.state && saved.state.theme;
-        if (['oled', 'dark', 'light', 'gruvbox', 'bloody', 'forest'].indexOf(theme) !== -1) {
+        if (['discord', 'oled', 'dark', 'light', 'gruvbox', 'bloody', 'forest'].indexOf(theme) !== -1) {
           document.documentElement.dataset.theme = theme;
         }
       } catch (error) {

@@ -16,6 +16,7 @@ files:
   - package.json
   - '!**/node_modules/**'
 linux:
+  icon: build/icon.png
   extraResources:
     - from: dist-electron/audio-capture/pulse-capture
       to: audio-capture/pulse-capture

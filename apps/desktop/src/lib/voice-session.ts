@@ -1,6 +1,7 @@
 import type { IceConfig, RtcSignalData, VoiceState } from '@phanteon/shared';
 import type { CaptureApp, CaptureMode } from '../../electron/shared/ipc';
 import { screenVideoConstraints, useAudioStore, type ScreenQuality } from '../app/stores/audio';
+import { useScreenShareStore } from '../app/stores/screen';
 import { api } from './api';
 import { realtime } from './realtime';
 import { VoiceRtc } from './voice-rtc';
@@ -16,10 +17,6 @@ import { VoiceRtc } from './voice-rtc';
 let current: { rtc: VoiceRtc; channelId: string; selfId: string } | null = null;
 let remoteSpeaking: (userId: string, speaking: boolean) => void = () => undefined;
 let localSpeaking: (speaking: boolean) => void = () => undefined;
-let remoteScreen: (userId: string, active: boolean) => void = () => undefined;
-let remoteScreenTrack: (userId: string, track: MediaStreamTrack | null) => void = () => undefined;
-let remoteScreenAudio: (userId: string, track: MediaStreamTrack | null) => void = () => undefined;
-let localScreen: (sharing: boolean, tracks: ScreenTracks) => void = () => undefined;
 
 let ice: RTCIceServer[] | undefined;
 let icePromise: Promise<RTCIceServer[]> | null = null;
@@ -27,6 +24,19 @@ let signalsBound = false;
 let audioCapture: { context: AudioContext; node: AudioWorkletNode; destination: MediaStreamAudioDestinationNode; port: MessagePort; dispose: () => void } | null = null;
 let shareStream: MediaStream | null = null;
 let removeShareError: () => void = () => undefined;
+
+function screens() {
+  return useScreenShareStore.getState();
+}
+
+/** Cuts the capture and the native helper; the RTC keeps its own view in sync. */
+function stopShareCapture(): void {
+  for (const track of shareStream?.getTracks() ?? []) track.stop();
+  shareStream = null;
+  removeShareError();
+  removeShareError = () => undefined;
+  stopAudioCapture();
+}
 
 /** Fetched once per session; failure just means calls use public STUN only. */
 async function loadIce(): Promise<RTCIceServer[]> {
@@ -52,39 +62,71 @@ function bindSignals(): void {
 /** Starts (or keeps) the mesh for the user's call. Safe to call on every state change. */
 export async function syncVoiceMesh(selfId: string, states: VoiceState[], channelId: string | null): Promise<void> {
   if (!channelId) {
-    stopAudioCapture();
+    stopShareCapture();
     current?.rtc.stop();
     current = null;
+    screens().reset();
     return;
   }
   bindSignals();
 
+  const inCall = states.filter((state) => state.channelId === channelId);
+  const mine = inCall.find((state) => state.user.id === selfId);
+  // any deafen implies mic mute (Discord semantics); the server holds the same rule
+  const micMuted = !!mine && (mine.selfMute || mine.serverMute || mine.serverDeaf || mine.selfDeaf);
+  const deafened = !!mine && (mine.selfDeaf || mine.serverDeaf);
+
   if (current && current.channelId === channelId) {
-    // roster changes: connect new peers, drop peers that left
-    const present = new Set(states.filter((s) => s.channelId === channelId).map((s) => s.user.id));
-    for (const userId of present) if (userId !== selfId) await current.rtc.connectTo(userId);
+    // roster changes: connect new peers and drop the ones that left
+    await reconcileVoiceMesh(
+      channelId,
+      inCall.map((state) => state.user.id),
+    );
+    // the mesh survived a reconnect: re-apply the authoritative local state and peer mutes
+    if (mine) {
+      current.rtc.setSelfMuted(micMuted);
+      current.rtc.setSelfDeafened(deafened);
+    }
+    for (const state of inCall) {
+      if (state.user.id === selfId) continue;
+      current.rtc.setPlaybackMuted(state.user.id, state.serverMute || state.serverDeaf || state.selfDeaf);
+    }
     return;
   }
 
-  stopAudioCapture();
+  stopShareCapture();
   current?.rtc.stop();
+  current = null;
+  screens().reset();
   const rtc = new VoiceRtc({
     channelId,
     selfId,
     send: (to, data: RtcSignalData) => realtime.sendSignal(to, channelId, data),
     onLocalSpeaking: (speaking) => localSpeaking(speaking),
     onRemoteSpeaking: (userId, speaking) => remoteSpeaking(userId, speaking),
-    onRemoteScreen: (userId, active) => remoteScreen(userId, active),
-    onRemoteScreenTrack: (userId, track) => remoteScreenTrack(userId, track),
-    onRemoteScreenAudioTrack: (userId, track) => remoteScreenAudio(userId, track),
-    onLocalScreen: (sharing, tracks) => localScreen(sharing, tracks),
+    onRemoteScreen: (userId, active) => screens().setSharing(userId, active),
+    onRemoteScreenTrack: (userId, track) => screens().setVideoTrack(userId, track),
+    onRemoteScreenAudioTrack: (userId, track) => screens().setAudioTrack(userId, track),
+    onLocalScreen: (sharing, tracks) => {
+      screens().setSharing(selfId, sharing);
+      screens().setVideoTrack(selfId, tracks.video);
+      screens().setAudioTrack(selfId, tracks.audio);
+    },
     iceServers: await loadIce(),
   });
   current = { rtc, channelId, selfId };
   try {
-    await rtc.join(states.filter((s) => s.channelId === channelId && s.user.id !== selfId).map((s) => s.user.id));
+    await rtc.join(inCall.filter((state) => state.user.id !== selfId).map((state) => state.user.id));
   } catch {
     // no microphone / permission denied: still connected to the call state
+  }
+  // the mute chosen before the call (or during a reconnect) must reach the fresh capture
+  rtc.setSelfMuted(micMuted);
+  rtc.setSelfDeafened(deafened);
+  rtc.setScreenAudioMuted(screens().localAudioMuted);
+  for (const state of inCall) {
+    if (state.user.id === selfId) continue;
+    rtc.setPlaybackMuted(state.user.id, state.serverMute || state.serverDeaf || state.selfDeaf);
   }
 }
 
@@ -120,40 +162,15 @@ export function disconnectVoicePeer(userId: string): void {
 }
 
 export function stopVoiceMesh(): void {
-  stopAudioCapture();
+  stopShareCapture();
   current?.rtc.stop();
   current = null;
+  screens().reset();
 }
 
 export function onSpeakingMeters(local: (speaking: boolean) => void, remote: (userId: string, speaking: boolean) => void): void {
   localSpeaking = local;
   remoteSpeaking = remote;
-}
-
-/** Tracks captured locally, handed to the sharer so their own tile shows the preview. */
-export interface ScreenTracks {
-  video: MediaStreamTrack | null;
-  audio: MediaStreamTrack | null;
-}
-
-export interface ScreenListeners {
-  active: (userId: string, sharing: boolean) => void;
-  track: (userId: string, track: MediaStreamTrack | null) => void;
-  audio: (userId: string, track: MediaStreamTrack | null) => void;
-  local: (sharing: boolean, tracks: ScreenTracks) => void;
-}
-
-export function onScreenShare(listeners: ScreenListeners): () => void {
-  remoteScreen = listeners.active;
-  remoteScreenTrack = listeners.track;
-  remoteScreenAudio = listeners.audio;
-  localScreen = listeners.local;
-  return () => {
-    remoteScreen = () => undefined;
-    remoteScreenTrack = () => undefined;
-    remoteScreenAudio = () => undefined;
-    localScreen = () => undefined;
-  };
 }
 
 /**
@@ -172,9 +189,9 @@ export async function startScreenShare(): Promise<{ hasAudio: boolean; label: st
   let stream: MediaStream | null = null;
   if (support.supported) {
     removeShareError = bridge.onAudioCaptureError((message) => {
-      stopAudioCapture();
+      // the native capture died: end the share for everyone instead of streaming silence
+      stopShareCapture();
       current?.rtc.stopScreenShare();
-      shareStream = null;
       console.error(message);
     });
   }
@@ -191,17 +208,18 @@ export async function startScreenShare(): Promise<{ hasAudio: boolean; label: st
     const audioTrack = audio && support.supported ? await startAudioCapture(audio.mode, audio.app, bridge) : null;
     const combined = new MediaStream([video, ...(audioTrack ? [audioTrack] : [])]);
     shareStream = combined;
-    const cleanupShare = () => { stopAudioCapture(); removeShareError(); shareStream = null; };
+    const cleanupShare = () => {
+      stopShareCapture();
+      current?.rtc.stopScreenShare();
+    };
     video.addEventListener('ended', cleanupShare, { once: true });
     audioTrack?.addEventListener('ended', cleanupShare, { once: true });
     await current.rtc.shareScreen(combined);
+    current.rtc.setScreenAudioMuted(screens().localAudioMuted);
     return { hasAudio: !!audioTrack, label: video.label, quality: video.getSettings() };
   } catch (error) {
     for (const track of stream?.getTracks() ?? []) track.stop();
-    await bridge.stopAudioCapture().catch(() => undefined);
-    audioCapture?.dispose();
-    audioCapture = null;
-    removeShareError();
+    stopShareCapture();
     throw error;
   }
 }
@@ -250,6 +268,7 @@ async function startAudioCapture(mode: CaptureMode, app: CaptureApp | undefined,
 }
 
 function stopAudioCapture(): void {
+  if (typeof window === 'undefined') return;
   void window.desktop?.stopAudioCapture().catch(() => undefined);
   audioCapture?.dispose();
   audioCapture = null;
@@ -269,11 +288,21 @@ export async function applyScreenQuality(quality: ScreenQuality): Promise<MediaT
 }
 
 export function stopScreenShare(): void {
-  current?.rtc.stopScreenShare();
-  for (const track of shareStream?.getTracks() ?? []) track.stop();
-  shareStream = null;
-  removeShareError();
-  stopAudioCapture();
+  const rtc = current;
+  rtc?.rtc.stopScreenShare();
+  stopShareCapture();
+  // without a live RTC (call ended mid-share) the callbacks no longer clear the stage
+  if (!rtc) screens().reset();
+}
+
+/** Stream audio has its own control: the mic mute never silences a screen share. */
+export function setScreenAudioMuted(muted: boolean): void {
+  screens().setLocalAudioMuted(muted);
+  current?.rtc.setScreenAudioMuted(muted);
+}
+
+export function screenAudioMuted(): boolean {
+  return screens().localAudioMuted;
 }
 
 export function sharingScreen(): boolean {

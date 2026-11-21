@@ -310,6 +310,37 @@ describe('VoiceRtc screen sharing', () => {
     rtc.stop();
   });
 
+  test('a peer who joins after the share started still receives the live track', async () => {
+    const { rtc, sent, peers } = await signal();
+    const video = Object.assign(new FakeTrack('screen-late'), { kind: 'video' });
+    const stream = { getVideoTracks: () => [video], getAudioTracks: () => [], getTracks: () => [video] } as unknown as MediaStream;
+    await rtc.shareScreen(stream);
+
+    await rtc.connectTo('carol');
+
+    const carol = peers.get('carol')!;
+    expect(carol.connection.added).toContain(video as unknown as FakeTrack);
+    expect(sent.filter((entry) => entry.to === 'carol' && entry.kind === 'screen')).toHaveLength(1);
+    rtc.stop();
+  });
+
+  test('a peer leaving mid-share clears the frozen frame and its announcement', async () => {
+    const { rtc, peers, screens, videoTracks } = await signal();
+    await rtc.applySignal('bob', { kind: 'screen', active: true });
+    const bob = peers.get('bob')!;
+    const ontrack = bob.connection.ontrack as (event: { track: FakeTrack; streams: unknown[] }) => void;
+    const video = Object.assign(new FakeTrack('screen-remote'), { kind: 'video' });
+    ontrack({ track: video, streams: [{}] });
+    expect(videoTracks.bob).toBe(video);
+    expect(screens.bob).toBe(true);
+
+    rtc.disconnectPeer('bob');
+
+    expect(videoTracks.bob).toBeNull();
+    expect(screens.bob).toBe(false);
+    rtc.stop();
+  });
+
   test('keeps a screen announcement that arrives before its offer', async () => {
     const { VoiceRtc } = await import('../src/lib/voice-rtc');
     const screens: Record<string, boolean> = {};
@@ -478,6 +509,27 @@ describe('VoiceRtc screen sharing with audio and renegotiation', () => {
     expect(mock.added.slice(before)).toEqual([video, audio]);
     expect((audio as unknown as { displayName?: string }).displayName).toBe(SCREEN_AUDIO_LABEL);
     expect(sent.find((event) => event.kind === 'screen')?.audio).toBe(true);
+    rtc.stop();
+  });
+
+  test('stream audio has its own mute and survives a microphone mute', async () => {
+    const { rtc, peer } = await boot('alice', 'bob');
+    const video = new FakeTrack('screen-v');
+    const audio = new FakeTrack('screen-a');
+    await rtc.shareScreen(capture(video, audio));
+
+    rtc.setSelfMuted(true);
+    const mic = (rtc as unknown as { localStream: { getAudioTracks: () => FakeTrack[] } }).localStream.getAudioTracks()[0]!;
+    expect(mic.enabled).toBe(false);
+    // muting the mic must not silence the shared application audio
+    expect(audio.enabled).toBe(true);
+
+    rtc.setScreenAudioMuted(true);
+    expect(audio.enabled).toBe(false);
+    rtc.setScreenAudioMuted(false);
+    expect(audio.enabled).toBe(true);
+
+    expect(peer.connection.added).toContain(audio as unknown as FakeTrack);
     rtc.stop();
   });
 

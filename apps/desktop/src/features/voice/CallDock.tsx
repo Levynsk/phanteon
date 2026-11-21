@@ -1,9 +1,11 @@
-import { Headphones, Mic, MicOff, MonitorUp, Phone, PhoneOff, ScreenShareOff, Settings } from 'lucide-react';
+import { Headphones, Mic, MicOff, MonitorUp, Phone, PhoneOff, ScreenShareOff, Settings, Volume2, VolumeX } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useState, type ComponentProps } from 'react';
 import { toast } from '../../components/ui/Toast';
 import { cn } from '../../lib/cn';
-import { sharingScreen, startScreenShare, stopScreenShare } from '../../lib/voice-session';
+import { useAuthStore } from '../../app/stores/auth';
+import { useScreenShareStore } from '../../app/stores/screen';
+import { setScreenAudioMuted, startScreenShare, stopScreenShare } from '../../lib/voice-session';
 
 /**
  * The call controls as one dock: call on the left, mic, sound, screen and
@@ -77,6 +79,7 @@ export function CallDock({
         onClick={onToggleSound}
       />
       <ScreenShareButton disabled={!inCall} />
+      <StreamAudioButton />
       <DockButton
         icon={Settings}
         label="Configurações de voz"
@@ -86,9 +89,10 @@ export function CallDock({
   );
 }
 
-/** Sharing is a session concern, so the button reads its own state instead of asking the page. */
+/** Sharing is a session concern, so the button reads the shared screen store. */
 function ScreenShareButton({ disabled }: { disabled: boolean }) {
-  const [sharing, setSharing] = useState(sharingScreen);
+  const selfId = useAuthStore((state) => state.user?.id);
+  const sharing = useScreenShareStore((state) => (selfId ? !!state.sharing[selfId] : false));
   const [busy, setBusy] = useState(false);
 
   const toggle = async () => {
@@ -97,11 +101,9 @@ function ScreenShareButton({ disabled }: { disabled: boolean }) {
     try {
       if (sharing) {
         stopScreenShare();
-        setSharing(false);
         return;
       }
       const { label, quality } = await startScreenShare();
-      setSharing(true);
       // report what the OS actually delivered, not what was asked for
       const actual =
         quality.width && quality.height
@@ -124,6 +126,26 @@ function ScreenShareButton({ disabled }: { disabled: boolean }) {
       active={sharing}
       disabled={disabled || busy}
       onClick={() => void toggle()}
+    />
+  );
+}
+
+/**
+ * The stream's own audio switch. It only appears when the running capture has
+ * audio; muting the microphone must not silence it.
+ */
+function StreamAudioButton() {
+  const selfId = useAuthStore((state) => state.user?.id);
+  const sharing = useScreenShareStore((state) => (selfId ? !!state.sharing[selfId] : false));
+  const hasAudio = useScreenShareStore((state) => (selfId ? !!state.audio[selfId] : false));
+  const muted = useScreenShareStore((state) => state.localAudioMuted);
+  if (!sharing || !hasAudio) return null;
+  return (
+    <DockButton
+      icon={muted ? VolumeX : Volume2}
+      label={muted ? 'Ativar áudio da transmissão' : 'Silenciar áudio da transmissão'}
+      off={muted}
+      onClick={() => setScreenAudioMuted(!muted)}
     />
   );
 }

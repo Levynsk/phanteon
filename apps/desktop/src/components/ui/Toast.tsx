@@ -78,7 +78,7 @@ export function Toaster() {
       {items.map((item) => (
         <ToastEntry key={item.id} item={item} />
       ))}
-      <ToastPrimitive.Viewport className="fixed bottom-4 right-4 z-[100] flex w-[340px] max-w-[calc(100vw-2rem)] flex-col gap-2 outline-none" />
+      <ToastPrimitive.Viewport className="fixed right-4 top-12 z-[100] flex w-[340px] max-w-[calc(100vw-2rem)] flex-col gap-2 outline-none" />
     </ToastPrimitive.Provider>
   );
 }

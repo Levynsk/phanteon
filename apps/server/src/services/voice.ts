@@ -130,14 +130,21 @@ export function joinVoice(user: UserRow, channelId: string): VoiceState {
   }
 
   // a deafened or muted user can still be there; only Speak gates transmission
+  // hopping channels must preserve both self flags (and moderator flags) instead of
+  // letting the user escape a server mute/deafen by changing voice channels
+  const wasDeaf = existing?.selfDeaf ?? false;
+  const wasMuted = existing?.selfMute ?? false;
+  const serverMute = existing?.serverMute ?? false;
+  const serverDeaf = existing?.serverDeaf ?? false;
   const row = {
     guildId: channel.guildId,
     userId: user.id,
     channelId: channel.id,
-    selfMute: !canSpeak || (existing?.selfDeaf ?? false),
-    selfDeaf: !canSpeak || (existing?.selfDeaf ?? false),
-    serverMute: false,
-    serverDeaf: false,
+    // moderator flags win over the user's own choice
+    selfMute: !canSpeak || wasMuted || wasDeaf || serverMute || serverDeaf,
+    selfDeaf: !canSpeak || wasDeaf || serverDeaf,
+    serverMute,
+    serverDeaf,
     joinedAt: nowIso(),
   };
   db.insert(schema.voiceStates).values(row).run();
@@ -223,7 +230,7 @@ export function moderateVoice(
     .set(
       action === 'serverMute'
         ? { serverMute: value, selfMute: value ? true : row.selfMute }
-        : { serverDeaf: value, selfDeaf: value ? true : row.selfDeaf },
+        : { serverDeaf: value, selfDeaf: value ? true : row.selfDeaf, selfMute: value ? true : row.selfMute },
     )
     .where(and(eq(schema.voiceStates.guildId, guildId), eq(schema.voiceStates.userId, targetUserId)))
     .run();

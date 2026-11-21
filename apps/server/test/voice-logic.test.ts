@@ -82,6 +82,36 @@ describe('voice logic', () => {
     expect(moved.body.state.selfDeaf).toBe(true);
   });
 
+  test('hopping channels keeps a microphone mute that is not a deafen', async () => {
+    const owner = await client.register();
+    const member = await client.register();
+    const { guildId, voiceId } = await callWith(owner, member);
+    const second = await helpers.createVoiceChannel(client, owner, guildId);
+    await client.call('POST', `/api/voice/channels/${voiceId}/join`, { token: member.token });
+    await client.call('PATCH', '/api/voice/@me', { token: member.token, body: { selfMute: true, selfDeaf: false } });
+
+    const moved = await client.call('POST', `/api/voice/channels/${second}/join`, { token: member.token });
+    expect(moved.body.state.selfMute).toBe(true);
+    expect(moved.body.state.selfDeaf).toBe(false);
+  });
+
+  test('a server deafen survives a channel hop instead of letting the user escape it', async () => {
+    const owner = await client.register();
+    const member = await client.register();
+    const { guildId, voiceId } = await callWith(owner, member);
+    const second = await helpers.createVoiceChannel(client, owner, guildId);
+    await client.call('POST', `/api/voice/channels/${voiceId}/join`, { token: member.token });
+
+    await client.call('PATCH', `/api/voice/guilds/${guildId}/members/${member.user.id}`, {
+      token: owner.token,
+      body: { action: 'serverDeaf' },
+    });
+    const moved = await client.call('POST', `/api/voice/channels/${second}/join`, { token: member.token });
+    expect(moved.body.state.serverDeaf).toBe(true);
+    // the client computes the effective mute as self OR server; the server flag stays authoritative
+    expect(moved.body.state.serverDeaf || moved.body.state.selfDeaf).toBe(true);
+  });
+
   test('a channel without Speak forces mute when joining', async () => {
     const owner = await client.register();
     const member = await client.register();

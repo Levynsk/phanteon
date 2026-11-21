@@ -249,6 +249,57 @@
  * need `border-white/5` (invisible on a light theme) or `bg-black/60` (which
  * paints a dark block on a light panel).
  */
+/* Discord: the client's grey hierarchy over a true-black OLED rail, with a crimson accent. */
+html[data-theme='discord'] {
+  --theme-app: #000000;
+  --theme-app-alt: #0b0b0d;
+  --theme-surface: #111214;
+  --theme-sidebar: #0d0d0f;
+  --theme-surface-alt: #16171a;
+  --theme-chat: #1a1b1e;
+  --theme-elevated: #232428;
+  --theme-panel: #111214;
+  --theme-panel-hover: #1a1b1e;
+  --theme-input: #0a0a0c;
+  --theme-input-sunken: #050506;
+  --theme-hover: rgb(255 255 255 / 0.06);
+  --theme-active: rgb(255 255 255 / 0.1);
+  --theme-selected: rgb(225 29 72 / 0.16);
+  --theme-white: rgb(255 255 255 / 0.08);
+  --theme-line: rgb(255 255 255 / 0.06);
+  --theme-line-strong: rgb(255 255 255 / 0.16);
+  --theme-tint: rgb(255 255 255 / 0.03);
+  --theme-tint-strong: rgb(255 255 255 / 0.08);
+  --theme-normal: #dbdee1;
+  --theme-heading: #f2f3f5;
+  --theme-muted: #949ba4;
+  --theme-faint: #80848e;
+  --theme-link: #fb7185;
+  --theme-brand: #e11d48;
+  --theme-brand-hover: #f43f5e;
+  --theme-brand-soft: rgb(225 29 72 / 0.18);
+  --theme-on-brand: #ffffff;
+  --theme-green: #23a55a;
+  --theme-green-hover: #1e9a52;
+  --theme-yellow: #fbbf24;
+  --theme-warn: #e8a12b;
+  --theme-red: #f23f42;
+  --theme-red-hover: #d83c3e;
+  --theme-divider: #26272b;
+  --theme-outline: #e11d48;
+  --theme-selection: rgb(225 29 72 / 0.34);
+  --theme-scrollbar: rgb(255 255 255 / 0.14);
+  --theme-star-dim: rgb(255 255 255 / 0.22);
+  --theme-star: rgb(251 113 133 / 0.55);
+  --theme-star-bright: rgb(254 205 211 / 0.9);
+  --theme-star-trail: rgb(225 29 72 / 0.12);
+  --theme-star-trail-mid: rgb(225 29 72 / 0.32);
+  --theme-star-trail-head: rgb(251 113 133 / 0.7);
+  --theme-switch-thumb: #ffffff;
+  --theme-switch-thumb-ring: rgb(0 0 0 / 0.2);
+  color-scheme: dark;
+}
+
 :root,
 [data-theme='oled'] {
   --theme-app: #000000;

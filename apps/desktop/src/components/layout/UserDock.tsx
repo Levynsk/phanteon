@@ -48,8 +48,8 @@ export function UserDock() {
   const navigate = useNavigate();
   const onOpenCall = (callGuildId: string, channelId: string) => navigate(`/app/${callGuildId}/${channelId}`);
   // out of a call the server has no seat to mute, so the dock shows what the next join will use
-  const micMuted = mine ? mine.selfMute : voicePreference.pending && voicePreference.selfMute;
-  const deafened = mine ? mine.selfDeaf : voicePreference.pending && voicePreference.selfDeaf;
+  const micMuted = mine ? mine.selfMute || mine.serverMute || mine.serverDeaf || mine.selfDeaf : voicePreference.pending && voicePreference.selfMute;
+  const deafened = mine ? mine.selfDeaf || mine.serverDeaf : voicePreference.pending && voicePreference.selfDeaf;
 
   const toggleMute = () => {
     void setSelfVoice({ selfMute: !micMuted }).catch((error: unknown) =>

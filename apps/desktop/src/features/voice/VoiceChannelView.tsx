@@ -1,4 +1,4 @@
-import { LogIn, Maximize2, MessageSquare, Minimize2, MonitorUp, UserRound, Volume1, Volume2 } from 'lucide-react';
+import { LogIn, Maximize2, MessageSquare, Minimize2, MonitorUp, ScreenShareOff, UserRound, Volume1, Volume2, VolumeX } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import type { Channel, VoiceState } from '@phanteon/shared';
@@ -7,14 +7,15 @@ import { useShallow } from 'zustand/react/shallow';
 import { canInGuild, useChatStore } from '../../app/stores/chat';
 import { useAuthStore } from '../../app/stores/auth';
 import { useUiStore } from '../../app/stores/ui';
+import { useScreenShareStore } from '../../app/stores/screen';
 import { Avatar } from '../../components/ui/Avatar';
 import { BannerBackdrop } from '../../components/layout/BannerBackdrop';
 import { ResizablePanel } from '../../components/layout/ResizablePanel';
 import { Button } from '../../components/ui/Button';
 import { toast } from '../../components/ui/Toast';
 import { cn } from '../../lib/cn';
-import { onScreenShare, setPlaybackVolume, sharingScreen, stopScreenShare } from '../../lib/voice-session';
-import { applySink, useAudioStore } from '../../app/stores/audio';
+import { setPlaybackVolume, setScreenAudioMuted, stopScreenShare } from '../../lib/voice-session';
+import { useAudioStore } from '../../app/stores/audio';
 import { openPersonMenu } from './personMenu';
 import { MIC_OFF, OFF_STATE, SOUND_OFF } from '../../lib/voice-indicators';
 import { CallDock } from './CallDock';
@@ -39,44 +40,27 @@ export function VoiceChannelView({ guildId, channel }: { guildId: string; channe
       Object.values(state.voiceStates).filter((state) => state.guildId === guildId && state.channelId === channel.id),
     ),
   );
-  const [sharing, setSharing] = useState<Record<string, boolean>>({});
-  const [screens, setScreens] = useState<Record<string, MediaStreamTrack | null>>({});
-  const [screenAudio, setScreenAudio] = useState<Record<string, MediaStreamTrack | null>>({});
-  const [sharingLocal, setSharingLocal] = useState(sharingScreen);
+  const sharing = useScreenShareStore((state) => state.sharing);
+  const screens = useScreenShareStore((state) => state.video);
+  const screenAudio = useScreenShareStore((state) => state.audio);
+  const localAudioMuted = useScreenShareStore((state) => state.localAudioMuted);
 
   const currentUserId = useAuthStore((state) => state.user?.id);
   const selfId = currentUserId ?? null;
-
-  useEffect(
-    () =>
-      onScreenShare({
-        active: (userId, active) => setSharing((current) => ({ ...current, [userId]: active })),
-        track: (userId, track) => setScreens((current) => ({ ...current, [userId]: track })),
-        audio: (userId, track) => setScreenAudio((current) => ({ ...current, [userId]: track })),
-        local: (active, tracks) => {
-          setSharingLocal(active);
-          // nobody sends us our own tracks, so the preview comes straight from the capture
-          if (selfId) {
-            setSharing((current) => ({ ...current, [selfId]: active }));
-            setScreens((current) => ({ ...current, [selfId]: tracks.video }));
-            setScreenAudio((current) => ({ ...current, [selfId]: tracks.audio }));
-          }
-        },
-      }),
-    [selfId],
-  );
+  const sharingLocal = selfId ? !!sharing[selfId] : false;
+  const localStreamHasAudio = selfId ? !!screenAudio[selfId] : false;
 
   const mine = participants.find((state) => state.user.id === currentUserId);
   const inThisChannel = myVoice?.guildId === guildId && myVoice.channelId === channel.id;
   const canConnect = canInGuild(guild, Permission.Connect);
-  const micMuted = mine?.selfMute ?? false;
-  const deafened = mine?.selfDeaf ?? false;
-  const anyoneSharing = Object.values(sharing).some(Boolean);
+  const micMuted = mine ? mine.selfMute || mine.serverMute || mine.serverDeaf || mine.selfDeaf : false;
+  const deafened = mine ? mine.selfDeaf || mine.serverDeaf : false;
 
-  // leaving the call must also stop a running share
+  // ending the call must also stop a running share; merely opening another voice
+  // channel while still connected must not interrupt the live transmission
   useEffect(() => {
-    if (!inThisChannel && sharingLocal) stopScreenShare();
-  }, [inThisChannel, sharingLocal]);
+    if (!myVoice && sharingLocal) stopScreenShare();
+  }, [myVoice, sharingLocal]);
 
   // A pending click is remembered so a double-click ends in the state the user last asked for
   // (join then leave), instead of firing two racing requests.
@@ -149,7 +133,15 @@ export function VoiceChannelView({ guildId, channel }: { guildId: string; channe
           </div>
 
           {/* the dock sits at the bottom of the stage column, under the tiles and always on screen */}
-          <div className="pointer-events-none relative z-10 flex shrink-0 justify-center pb-3">
+          <div className="pointer-events-none relative z-10 flex shrink-0 flex-col items-center gap-2 pb-3">
+            {sharingLocal ? (
+              <StreamBar
+                hasAudio={localStreamHasAudio}
+                audioMuted={localAudioMuted}
+                onToggleAudio={() => setScreenAudioMuted(!localAudioMuted)}
+                onStop={stopScreenShare}
+              />
+            ) : null}
             <CallDock
               variant="floating"
               inCall={inThisChannel}
@@ -173,40 +165,59 @@ export function VoiceChannelView({ guildId, channel }: { guildId: string; channe
         </header>
         <MessageList channelId={channel.id} guildId={guildId} />
       </ResizablePanel>
-
-      {/* screen audio is a separate track from the voices, so it plays in its own element */}
-      {Object.entries(screenAudio).map(([userId, track]) =>
-        // our own capture is already audible locally; replaying it would double the sound
-        track && userId !== selfId ? <ScreenAudio key={userId} userId={userId} track={track} /> : null,
-      )}
     </div>
   );
 }
 
-/** Plays a peer's shared screen audio, kept apart from call audio to avoid doubling it. */
-function ScreenAudio({ userId, track }: { userId: string; track: MediaStreamTrack }) {
-  const outputId = useAudioStore((state) => state.prefs.outputId);
-  const volume = useAudioStore((state) => state.prefs.outputVolume);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-
-  useEffect(() => {
-    const element = audioRef.current;
-    if (!element) return;
-    element.srcObject = new MediaStream([track]);
-    void element.play().catch(() => undefined);
-    return () => {
-      if (element.srcObject instanceof MediaStream) element.srcObject = null;
-    };
-  }, [track]);
-
-  useEffect(() => {
-    const element = audioRef.current;
-    if (!element) return;
-    element.volume = volume;
-    void applySink(element, outputId).catch(() => undefined);
-  }, [outputId, volume]);
-
-  return <audio ref={audioRef} autoPlay className="hidden" data-screen-audio={userId} />;
+/**
+ * Controls that only make sense while the local screen is live: the stream audio
+ * has its own mute (the mic button must not silence it) and the share can be
+ * stopped without opening the OS picker again.
+ */
+function StreamBar({
+  hasAudio,
+  audioMuted,
+  onToggleAudio,
+  onStop,
+}: {
+  hasAudio: boolean;
+  audioMuted: boolean;
+  onToggleAudio: () => void;
+  onStop: () => void;
+}) {
+  return (
+    <div className="pointer-events-auto flex items-center gap-1.5 rounded-xl border border-divider bg-surface-alt/95 py-1.5 pl-3 pr-1.5 shadow-elevated">
+      <MonitorUp size={15} className="shrink-0 text-brand" aria-hidden />
+      <span className="text-[12px] font-semibold text-heading">Transmitindo</span>
+      <span className="mr-1 hidden text-[11px] text-muted sm:inline">
+        {hasAudio ? (audioMuted ? 'áudio silenciado' : 'com áudio') : 'sem áudio'}
+      </span>
+      {hasAudio ? (
+        <button
+          type="button"
+          onClick={onToggleAudio}
+          aria-pressed={audioMuted}
+          aria-label={audioMuted ? 'Ativar áudio da transmissão' : 'Silenciar áudio da transmissão'}
+          title={audioMuted ? 'Ativar áudio da transmissão' : 'Silenciar áudio da transmissão'}
+          className={cn(
+            'inline-flex size-8 items-center justify-center rounded-lg transition-colors',
+            audioMuted ? 'bg-red/15 text-red hover:bg-red/25' : 'bg-elevated text-muted hover:bg-active hover:text-heading',
+          )}
+        >
+          {audioMuted ? <VolumeX size={16} aria-hidden /> : <Volume2 size={16} aria-hidden />}
+        </button>
+      ) : null}
+      <button
+        type="button"
+        onClick={onStop}
+        aria-label="Parar transmissão"
+        title="Parar transmissão"
+        className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-red px-2.5 text-[12px] font-semibold text-on-image transition-colors hover:bg-red/85"
+      >
+        <ScreenShareOff size={15} aria-hidden /> Parar
+      </button>
+    </div>
+  );
 }
 
 /**

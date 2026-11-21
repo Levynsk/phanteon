@@ -16,6 +16,7 @@ import { DmSidebar } from '../features/dms/DmSidebar';
 import { ChannelHeader } from '../features/messages/ChannelHeader';
 import { MessageList } from '../features/messages/MessageList';
 import { VoiceChannelView } from '../features/voice/VoiceChannelView';
+import { ScreenAudioLayer } from '../features/voice/ScreenAudioLayer';
 import { MemberList } from '../features/members/MemberList';
 import { ServerRail } from '../features/servers/ServerRail';
 import { FriendsPanel } from '../features/friends/FriendsPanel';
@@ -132,6 +133,8 @@ export function AppPage() {
         {showMemberList ? <MemberList guildId={guildId ?? ""} /> : null}
       </div>
       <ModalHost />
+      {/* plays stream audio while the call is up, even when another channel is open */}
+      <ScreenAudioLayer />
       {/* right-click menu of a person in a call; mounted once, above every panel */}
       <CallPersonMenu />
     </div>
